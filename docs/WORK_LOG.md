@@ -51,3 +51,59 @@ Use this as the running handoff log between sessions.
 
 ### Next Session First Step
 - Open `docs/SESSION_START.md` and run the checklist.
+
+## 2026-03-05 17:41 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Implemented `tools.catalog` over WS:
+  - Added `tools.catalog` to connect feature methods.
+  - Added WS handling to return `{"tools": [...]}` payload.
+- Added tool schema introspection in `internal/tools`:
+  - Introduced tool `Metadata` with `inputSchema`/`outputSchema`.
+  - Added `Registry.Catalog()` with deterministic sorting and default object input schema.
+  - Added metadata for built-in `time_now` tool.
+- Wired gateway to serve catalog from the shared tool registry.
+- Added test coverage:
+  - WS integration assertion for `tools.catalog` handshake + payload.
+  - Unit tests for `Registry.Catalog()` behavior.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- Current tool execution remains explicit (`!tool <name>`); model-driven auto tool-calling is not implemented yet.
+
+### Next Session First Step
+- Implement structured tool invocation flow (model/tool-call protocol) to move beyond manual `!tool` command path.
+
+## 2026-03-05 17:52 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `codex/tools-catalog-introspection`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Fixed runtime behavior where model output could stop at a tool "plan" (e.g. `SERVER_TIME_NOW: time_now()`) without executing the tool.
+- Added a model-output tool-call bridge in runtime:
+  - Parse strict tool-call lines from generated text.
+  - Execute matched registered tool via existing policy guardrails.
+  - Return concrete final output for `time_now` as `Server time now: <RFC3339>`.
+  - Emit tool event before final response when execution succeeds.
+- Added tests in `internal/agentruntime/runtime_model_test.go`:
+  - executes tool call emitted by model output.
+  - enforces deny policy for model-emitted tool call.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- Current parser intentionally supports one simple call pattern per line; full multi-tool/function-call protocol remains a future step.
+
+### Next Session First Step
+- Migrate this bridge to structured model function-calling payloads (provider-native) and support typed arguments.

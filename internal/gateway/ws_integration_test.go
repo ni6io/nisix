@@ -54,8 +54,11 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 		},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewNowTool())
+
 	rt := agentruntime.New(
-		tools.NewRegistry(),
+		reg,
 		toolpolicy.Policy{},
 		memory.NewService(workspace),
 		domain.AgentIdentity{Name: "Assistant"},
@@ -95,6 +98,7 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 		nil,
 		nil,
 		skillSvc,
+		reg,
 		workspace,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
@@ -128,6 +132,26 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	if frame["type"] != "res" || frame["ok"] != true {
 		t.Fatalf("unexpected connect response: %#v", frame)
 	}
+	connectPayload := frame["payload"].(map[string]any)
+	features := connectPayload["features"].(map[string]any)
+	methods := features["methods"].([]any)
+	if !containsString(methods, "tools.catalog") {
+		t.Fatalf("expected tools.catalog in methods list: %#v", methods)
+	}
+
+	mustSendReq(t, conn, map[string]any{
+		"type":   "req",
+		"id":     "2a",
+		"method": "tools.catalog",
+		"params": map[string]any{},
+	})
+	frame = mustReadFrame(t, conn, 2*time.Second)
+	if frame["id"] != "2a" || frame["ok"] != true {
+		t.Fatalf("unexpected tools.catalog response: %#v", frame)
+	}
+	payload := frame["payload"].(map[string]any)
+	toolsList := payload["tools"].([]any)
+	assertTool(t, toolsList, "time_now")
 
 	mustSendReq(t, conn, map[string]any{
 		"type":   "req",
@@ -139,7 +163,7 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	if frame["id"] != "2" || frame["ok"] != true {
 		t.Fatalf("unexpected skills.list response: %#v", frame)
 	}
-	payload := frame["payload"].(map[string]any)
+	payload = frame["payload"].(map[string]any)
 	skillsList := payload["skills"].([]any)
 	if len(skillsList) < 2 {
 		t.Fatalf("expected at least 2 skills, got %d", len(skillsList))
@@ -245,7 +269,7 @@ func TestWSChatHistoryFilters(t *testing.T) {
 
 	cfg := config.Config{Agents: config.AgentsConfig{DefaultID: "main", List: []config.AgentConfig{{ID: "main", Workspace: workspace}}}, Bindings: []config.BindingRule{{AgentID: "main", Match: config.BindingMatch{Channel: "telegram", AccountID: "*"}}}}
 	sessionManager := sessions.NewManager(sessions.NewInMemoryStore(), t.TempDir())
-	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, nil, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ts := httptest.NewServer(server.WSHandler())
 	defer ts.Close()
@@ -301,7 +325,7 @@ func TestWSChatAbort(t *testing.T) {
 
 	cfg := config.Config{Agents: config.AgentsConfig{DefaultID: "main", List: []config.AgentConfig{{ID: "main", Workspace: workspace}}}, Bindings: []config.BindingRule{{AgentID: "main", Match: config.BindingMatch{Channel: "telegram", AccountID: "*"}}}}
 	sessionManager := sessions.NewManager(sessions.NewInMemoryStore(), t.TempDir())
-	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, nil, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ts := httptest.NewServer(server.WSHandler())
 	defer ts.Close()
@@ -399,7 +423,7 @@ func TestWSChatHistoryCursorPagination(t *testing.T) {
 
 	cfg := config.Config{Agents: config.AgentsConfig{DefaultID: "main", List: []config.AgentConfig{{ID: "main", Workspace: workspace}}}, Bindings: []config.BindingRule{{AgentID: "main", Match: config.BindingMatch{Channel: "telegram", AccountID: "*"}}}}
 	sessionManager := sessions.NewManager(sessions.NewInMemoryStore(), t.TempDir())
-	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, nil, nil, skillSvc, nil, workspace, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ts := httptest.NewServer(server.WSHandler())
 	defer ts.Close()
@@ -514,7 +538,7 @@ func TestWSProfileAndBootstrapFlows(t *testing.T) {
 
 	cfg := config.Config{Agents: config.AgentsConfig{DefaultID: "main", List: []config.AgentConfig{{ID: "main", Workspace: workspaceDir}}}, Bindings: []config.BindingRule{{AgentID: "main", Match: config.BindingMatch{Channel: "telegram", AccountID: "*"}}}}
 	sessionManager := sessions.NewManager(sessions.NewInMemoryStore(), t.TempDir())
-	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, profileSvc, bootstrapSvc, skillSvc, workspaceDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := New(router.NewResolver(cfg), rt, &noopHub{}, security.NewTokenAuthenticator("test-token"), sessionManager, profileSvc, bootstrapSvc, skillSvc, nil, workspaceDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ts := httptest.NewServer(server.WSHandler())
 	defer ts.Close()
@@ -689,4 +713,32 @@ func assertSkillStatus(t *testing.T, list []any, name string, enabled bool, reas
 		}
 	}
 	t.Fatalf("skill %s not found in list %#v", name, list)
+}
+
+func assertTool(t *testing.T, list []any, name string) {
+	t.Helper()
+	for _, item := range list {
+		tool := item.(map[string]any)
+		if tool["name"] != name {
+			continue
+		}
+		inputSchema, ok := tool["inputSchema"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %s missing inputSchema: %#v", name, tool)
+		}
+		if inputSchema["type"] != "object" {
+			t.Fatalf("tool %s input schema type mismatch: %#v", name, inputSchema)
+		}
+		return
+	}
+	t.Fatalf("tool %s not found in list %#v", name, list)
+}
+
+func containsString(list []any, want string) bool {
+	for _, item := range list {
+		if s, ok := item.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
 }

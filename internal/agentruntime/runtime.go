@@ -2,8 +2,10 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 	"github.com/ni6io/nisix/internal/toolpolicy"
 	"github.com/ni6io/nisix/internal/tools"
 )
+
+var toolCallLinePattern = regexp.MustCompile(`^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*:\s*)?([a-z][a-z0-9_]*)\s*\(\s*(\{.*\})?\s*\)\s*$`)
 
 type Runtime struct {
 	tools               *tools.Registry
@@ -245,6 +249,13 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "model error: " + err.Error(), Done: true}
 				return
 			}
+			if toolEvent, finalText, handled := r.maybeExecuteGeneratedToolCall(ctx, generated); handled {
+				if strings.TrimSpace(toolEvent) != "" {
+					out <- domain.AgentEvent{Kind: "tool", RunID: runID, SessionKey: req.SessionKey, Text: toolEvent}
+				}
+				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: finalText, Done: true}
+				return
+			}
 			r.log.Info("runtime.complete", "agentID", req.AgentID, "sessionKey", req.SessionKey, "provider", "model")
 			out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: generated, Done: true}
 			return
@@ -401,4 +412,78 @@ func formatProfileCommandError(err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+func (r *Runtime) maybeExecuteGeneratedToolCall(ctx context.Context, generated string) (string, string, bool) {
+	name, input, found, err := r.parseToolCallFromGeneratedText(generated)
+	if !found {
+		return "", "", false
+	}
+	if err != nil {
+		return "", "tool error: " + err.Error(), true
+	}
+	if !r.policy.Allowed(name) {
+		return "", "tool blocked by policy", true
+	}
+	if r.tools == nil {
+		return "", "tool error: tools registry is not configured", true
+	}
+	res, execErr := r.tools.Execute(ctx, name, input)
+	if execErr != nil {
+		return "", "tool error: " + execErr.Error(), true
+	}
+
+	eventText := fmt.Sprintf("tool %s result: %+v", name, res.Data)
+	if name == "time_now" {
+		if data, ok := res.Data.(map[string]any); ok {
+			if now, ok := data["now"]; ok {
+				return eventText, fmt.Sprintf("Server time now: %v", now), true
+			}
+		}
+	}
+	encoded, marshalErr := json.Marshal(res.Data)
+	if marshalErr == nil {
+		return eventText, string(encoded), true
+	}
+	return eventText, eventText, true
+}
+
+func (r *Runtime) parseToolCallFromGeneratedText(generated string) (string, map[string]any, bool, error) {
+	if r.tools == nil {
+		return "", nil, false, nil
+	}
+	registered := make(map[string]struct{}, len(r.tools.List()))
+	for _, name := range r.tools.List() {
+		registered[name] = struct{}{}
+	}
+	if len(registered) == 0 {
+		return "", nil, false, nil
+	}
+
+	lines := strings.Split(generated, "\n")
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "```") {
+			continue
+		}
+		line = strings.Trim(line, "`")
+		match := toolCallLinePattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		name := match[1]
+		if _, ok := registered[name]; !ok {
+			continue
+		}
+		argsRaw := strings.TrimSpace(match[2])
+		if argsRaw == "" {
+			return name, map[string]any{}, true, nil
+		}
+		var input map[string]any
+		if err := json.Unmarshal([]byte(argsRaw), &input); err != nil {
+			return "", nil, true, fmt.Errorf("invalid tool input JSON: %w", err)
+		}
+		return name, input, true, nil
+	}
+	return "", nil, false, nil
 }

@@ -84,6 +84,8 @@ type SkillsListParams struct {
 	EnabledOnly bool `json:"enabledOnly"`
 }
 
+type ToolsCatalogParams struct{}
+
 type ChatAbortParams struct {
 	RunID      string `json:"runId"`
 	SessionKey string `json:"sessionKey"`
