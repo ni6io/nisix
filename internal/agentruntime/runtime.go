@@ -182,15 +182,40 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 			if len(parts) >= 2 {
 				name := parts[1]
 				if !r.policy.Allowed(name) {
-					out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "tool blocked by policy", Done: true}
+					out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "tool blocked by policy", Provider: "tool", Done: true}
 					return
 				}
 				res, err := r.tools.Execute(ctx, name, map[string]any{})
 				if err != nil {
-					out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "tool error: " + err.Error(), Done: true}
+					out <- domain.AgentEvent{
+						Kind:       "final",
+						RunID:      runID,
+						SessionKey: req.SessionKey,
+						Text:       "tool error: " + err.Error(),
+						Provider:   "tool",
+						ToolCall: &domain.ToolCall{
+							Name:   name,
+							Input:  map[string]any{},
+							Error:  err.Error(),
+							Status: "error",
+						},
+						Done: true,
+					}
 					return
 				}
-				out <- domain.AgentEvent{Kind: "tool", RunID: runID, SessionKey: req.SessionKey, Text: fmt.Sprintf("tool %s result: %+v", name, res.Data)}
+				out <- domain.AgentEvent{
+					Kind:       "tool",
+					RunID:      runID,
+					SessionKey: req.SessionKey,
+					Text:       fmt.Sprintf("tool %s result: %+v", name, res.Data),
+					Provider:   "tool",
+					ToolCall: &domain.ToolCall{
+						Name:   name,
+						Input:  map[string]any{},
+						Output: res.Data,
+						Status: "success",
+					},
+				}
 				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "done", Done: true}
 				return
 			}
@@ -246,18 +271,18 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 				MemoryHits:     memHits,
 			})
 			if err != nil {
-				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "model error: " + err.Error(), Done: true}
+				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "model error: " + err.Error(), Provider: "model", Done: true}
 				return
 			}
-			if toolEvent, finalText, handled := r.maybeExecuteGeneratedToolCall(ctx, generated); handled {
+			if toolEvent, finalText, toolCall, handled := r.maybeExecuteGeneratedToolCall(ctx, generated); handled {
 				if strings.TrimSpace(toolEvent) != "" {
-					out <- domain.AgentEvent{Kind: "tool", RunID: runID, SessionKey: req.SessionKey, Text: toolEvent}
+					out <- domain.AgentEvent{Kind: "tool", RunID: runID, SessionKey: req.SessionKey, Text: toolEvent, Provider: "tool", ToolCall: toolCall}
 				}
-				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: finalText, Done: true}
+				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: finalText, Provider: "tool", Done: true}
 				return
 			}
 			r.log.Info("runtime.complete", "agentID", req.AgentID, "sessionKey", req.SessionKey, "provider", "model")
-			out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: generated, Done: true}
+			out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: generated, Provider: "model", Done: true}
 			return
 		}
 
@@ -421,38 +446,53 @@ func formatProfileCommandError(err error) string {
 	}
 }
 
-func (r *Runtime) maybeExecuteGeneratedToolCall(ctx context.Context, generated string) (string, string, bool) {
+func (r *Runtime) maybeExecuteGeneratedToolCall(ctx context.Context, generated string) (string, string, *domain.ToolCall, bool) {
 	name, input, found, err := r.parseToolCallFromGeneratedText(generated)
 	if !found {
-		return "", "", false
+		return "", "", nil, false
 	}
 	if err != nil {
-		return "", "tool error: " + err.Error(), true
+		return "", "tool error: " + err.Error(), nil, true
 	}
 	if !r.policy.Allowed(name) {
-		return "", "tool blocked by policy", true
+		return "", "tool blocked by policy", &domain.ToolCall{
+			Name:   name,
+			Input:  input,
+			Status: "blocked",
+		}, true
 	}
 	if r.tools == nil {
-		return "", "tool error: tools registry is not configured", true
+		return "", "tool error: tools registry is not configured", nil, true
 	}
 	res, execErr := r.tools.Execute(ctx, name, input)
 	if execErr != nil {
-		return "", "tool error: " + execErr.Error(), true
+		return "", "tool error: " + execErr.Error(), &domain.ToolCall{
+			Name:   name,
+			Input:  input,
+			Error:  execErr.Error(),
+			Status: "error",
+		}, true
+	}
+	toolCall := &domain.ToolCall{
+		Name:   name,
+		Input:  input,
+		Output: res.Data,
+		Status: "success",
 	}
 
 	eventText := fmt.Sprintf("tool %s result: %+v", name, res.Data)
 	if name == "time_now" {
 		if data, ok := res.Data.(map[string]any); ok {
 			if now, ok := data["now"]; ok {
-				return eventText, fmt.Sprintf("Server time now: %v", now), true
+				return eventText, fmt.Sprintf("Server time now: %v", now), toolCall, true
 			}
 		}
 	}
 	encoded, marshalErr := json.Marshal(res.Data)
 	if marshalErr == nil {
-		return eventText, string(encoded), true
+		return eventText, string(encoded), toolCall, true
 	}
-	return eventText, eventText, true
+	return eventText, eventText, toolCall, true
 }
 
 func (r *Runtime) parseToolCallFromGeneratedText(generated string) (string, map[string]any, bool, error) {

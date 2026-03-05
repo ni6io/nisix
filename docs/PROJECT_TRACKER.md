@@ -52,7 +52,7 @@ Status legend: `todo`, `in_progress`, `done`, `blocked`.
 | ID | Item | Status | Notes |
 |---|---|---|---|
 | P1 | `tools.catalog` WS method + tool schema introspection | done | Added WS method + catalog metadata/schema from tool registry |
-| P2 | Transcript schema v2 (tool calls + metadata + usage) | todo | Backward-compatible migration needed |
+| P2 | Transcript schema v2 (tool calls + metadata + usage) | done | Added v2 fields + backward-compatible history normalization |
 | P3 | Multi-account Telegram support | todo | Requires config/routing expansion |
 | P4 | Typed plugin runtime + sandbox policy | todo | Larger architecture step |
 | P5 | Session observability pack (`runId/sessionKey` dashboards/log conventions) | todo | Useful for production operations |
