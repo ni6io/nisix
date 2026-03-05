@@ -1,0 +1,99 @@
+{
+  "gateway": {
+    "bind": "127.0.0.1",
+    "port": 18789,
+    "token": "dev-token"
+  },
+  "agents": {
+    "defaultId": "main",
+    "list": [
+      {
+        "id": "main",
+        "workspace": "./workspace/main"
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "agentId": "main",
+      "match": {
+        "channel": "telegram",
+        "accountId": "*"
+      }
+    }
+  ],
+  "session": {
+    "dmMode": "per-channel-peer",
+    "stateDir": "./state"
+  },
+  "workspace": {
+    "bootstrapFromTemplates": true,
+    "templateDir": "./workspace/templates"
+  },
+  "bootstrap": {
+    "reloadMode": "per_message"
+  },
+  "profile": {
+    "updateMode": "hybrid",
+    "autoDetectEnabled": true,
+    "allowedFiles": [
+      "IDENTITY.md",
+      "SOUL.md",
+      "USER.md",
+      "TOOLS.md",
+      "AGENTS.md",
+      "MEMORY.md"
+    ],
+    "maxFileBytes": 262144
+  },
+  "tools": {
+    "profile": "minimal",
+    "allow": [
+      "time_now"
+    ],
+    "deny": []
+  },
+  "memory": {
+    "enabled": true,
+    "autoLoadScope": "dm_only"
+  },
+  "skills": {
+    "enabled": true,
+    "autoMatch": true,
+    "maxInjected": 1,
+    "allowlist": [],
+    "maxBodyChars": 4000,
+    "entries": {}
+  },
+  "model": {
+    "provider": "ollama",
+    "timeoutSec": 60,
+    "openai": {
+      "apiKey": "YOUR_OPENAI_API_KEY",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-5-codex"
+    },
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434",
+      "model": "llama3.2"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "polling": true,
+      "botUsername": "",
+      "autoDetectBotUsername": true,
+      "requireMentionInGroups": true,
+      "enableHelpCommands": true,
+      "minUserIntervalMs": 700,
+      "dedupeWindow": 2048,
+      "allowlistMode": "users",
+      "allowUsers": [
+        "YOUR_TELEGRAM_USER_ID"
+      ],
+      "allowChats": []
+    }
+  }
+}

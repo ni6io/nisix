@@ -1,0 +1,4 @@
+/bin/
+*.log
+/state/
+configs/nisix.local.json
