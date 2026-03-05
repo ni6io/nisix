@@ -13,14 +13,50 @@ import (
 	"time"
 )
 
+const TranscriptSchemaV2 = 2
+
 type MessageRecord struct {
-	Type       string    `json:"type"`
-	Role       string    `json:"role"`
-	SessionID  string    `json:"sessionId"`
-	SessionKey string    `json:"sessionKey"`
-	AgentID    string    `json:"agentId"`
-	Text       string    `json:"text"`
-	At         time.Time `json:"at"`
+	SchemaVersion int               `json:"schemaVersion,omitempty"`
+	Type          string            `json:"type"`
+	EventType     string            `json:"eventType,omitempty"`
+	Role          string            `json:"role"`
+	SessionID     string            `json:"sessionId"`
+	SessionKey    string            `json:"sessionKey"`
+	AgentID       string            `json:"agentId"`
+	RunID         string            `json:"runId,omitempty"`
+	Kind          string            `json:"kind,omitempty"`
+	Provider      string            `json:"provider,omitempty"`
+	Text          string            `json:"text"`
+	Aborted       bool              `json:"aborted,omitempty"`
+	ToolCall      *ToolCallRecord   `json:"toolCall,omitempty"`
+	Usage         *UsageRecord      `json:"usage,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	At            time.Time         `json:"at"`
+}
+
+type ToolCallRecord struct {
+	Name   string         `json:"name"`
+	Input  map[string]any `json:"input,omitempty"`
+	Output any            `json:"output,omitempty"`
+	Error  string         `json:"error,omitempty"`
+	Status string         `json:"status,omitempty"`
+}
+
+type UsageRecord struct {
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	TotalTokens  int `json:"totalTokens,omitempty"`
+}
+
+type AppendOptions struct {
+	EventType string
+	RunID     string
+	Kind      string
+	Provider  string
+	Aborted   bool
+	ToolCall  *ToolCallRecord
+	Usage     *UsageRecord
+	Metadata  map[string]string
 }
 
 type Manager struct {
@@ -75,20 +111,41 @@ func (m *Manager) Touch(sessionKey, agentID string) (Entry, error) {
 }
 
 func (m *Manager) Append(entry Entry, role, text string) error {
-	if text == "" {
+	return m.AppendWithOptions(entry, role, text, AppendOptions{})
+}
+
+func (m *Manager) AppendWithOptions(entry Entry, role, text string, opts AppendOptions) error {
+	if strings.TrimSpace(text) == "" && opts.ToolCall == nil && opts.Usage == nil && len(opts.Metadata) == 0 {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	recordType := "message"
+	eventType := strings.TrimSpace(opts.EventType)
+	if eventType == "" {
+		eventType = "message"
+	}
+	if eventType != "message" {
+		recordType = "event"
+	}
 	record := MessageRecord{
-		Type:       "message",
-		Role:       role,
-		SessionID:  entry.SessionID,
-		SessionKey: entry.SessionKey,
-		AgentID:    entry.AgentID,
-		Text:       text,
-		At:         time.Now().UTC(),
+		SchemaVersion: TranscriptSchemaV2,
+		Type:          recordType,
+		EventType:     eventType,
+		Role:          role,
+		SessionID:     entry.SessionID,
+		SessionKey:    entry.SessionKey,
+		AgentID:       entry.AgentID,
+		RunID:         strings.TrimSpace(opts.RunID),
+		Kind:          strings.TrimSpace(opts.Kind),
+		Provider:      strings.TrimSpace(opts.Provider),
+		Text:          text,
+		Aborted:       opts.Aborted,
+		ToolCall:      opts.ToolCall,
+		Usage:         opts.Usage,
+		Metadata:      opts.Metadata,
+		At:            time.Now().UTC(),
 	}
 
 	if err := os.MkdirAll(m.transcriptDir, 0o755); err != nil {
@@ -154,6 +211,7 @@ func (m *Manager) HistoryPageFiltered(sessionKey string, filter HistoryFilter) (
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}
+		normalizeMessageRecord(&rec, entry)
 		if filter.Role != "" && rec.Role != filter.Role {
 			continue
 		}
@@ -211,4 +269,33 @@ func (m *Manager) HistoryPageFiltered(sessionKey string, filter HistoryFilter) (
 		page.PrevCursor = strconv.Itoa(prevStart)
 	}
 	return page, nil
+}
+
+func normalizeMessageRecord(rec *MessageRecord, entry Entry) {
+	if rec.SessionID == "" {
+		rec.SessionID = entry.SessionID
+	}
+	if rec.SessionKey == "" {
+		rec.SessionKey = entry.SessionKey
+	}
+	if rec.AgentID == "" {
+		rec.AgentID = entry.AgentID
+	}
+	if rec.Type == "" {
+		rec.Type = "message"
+	}
+	if rec.EventType == "" {
+		if rec.Type == "event" {
+			rec.EventType = "event"
+		} else {
+			rec.EventType = "message"
+		}
+	}
+	if rec.SchemaVersion == 0 {
+		if rec.RunID != "" || rec.Kind != "" || rec.Provider != "" || rec.ToolCall != nil || rec.Usage != nil || len(rec.Metadata) > 0 || rec.EventType != "message" {
+			rec.SchemaVersion = TranscriptSchemaV2
+		} else {
+			rec.SchemaVersion = 1
+		}
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -91,6 +92,102 @@ func TestHistoryPageFilteredBeforeAfter(t *testing.T) {
 	}
 	if len(page.Messages) != 1 || page.Messages[0].Text != "b" {
 		t.Fatalf("unexpected filtered messages: %#v", page.Messages)
+	}
+}
+
+func TestAppendWithOptionsWritesSchemaV2(t *testing.T) {
+	transcriptDir := t.TempDir()
+	store := NewInMemoryStore()
+	mgr := NewManager(store, transcriptDir)
+	entry := Entry{
+		SessionKey: "agent:main:test3",
+		SessionID:  "sess-3",
+		AgentID:    "main",
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := store.Put(entry); err != nil {
+		t.Fatalf("put entry: %v", err)
+	}
+
+	if err := mgr.AppendWithOptions(entry, "assistant", "tool time_now result: ...", AppendOptions{
+		EventType: "tool_call",
+		RunID:     "run-1",
+		Kind:      "tool",
+		Provider:  "tool",
+		ToolCall: &ToolCallRecord{
+			Name:   "time_now",
+			Status: "success",
+			Output: map[string]any{"now": "2026-03-05T11:00:00Z"},
+		},
+		Metadata: map[string]string{"channel": "telegram"},
+	}); err != nil {
+		t.Fatalf("append v2: %v", err)
+	}
+
+	page, err := mgr.HistoryPageFiltered(entry.SessionKey, HistoryFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("history page: %v", err)
+	}
+	if len(page.Messages) != 1 {
+		t.Fatalf("expected one message, got %d", len(page.Messages))
+	}
+	got := page.Messages[0]
+	if got.SchemaVersion != TranscriptSchemaV2 || got.EventType != "tool_call" || got.RunID != "run-1" {
+		t.Fatalf("unexpected schema v2 fields: %#v", got)
+	}
+	if got.ToolCall == nil || got.ToolCall.Name != "time_now" || got.ToolCall.Status != "success" {
+		t.Fatalf("missing tool call details: %#v", got)
+	}
+}
+
+func TestHistoryNormalizesLegacyRecords(t *testing.T) {
+	transcriptDir := t.TempDir()
+	store := NewInMemoryStore()
+	mgr := NewManager(store, transcriptDir)
+	entry := Entry{
+		SessionKey: "agent:main:test4",
+		SessionID:  "sess-4",
+		AgentID:    "main",
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := store.Put(entry); err != nil {
+		t.Fatalf("put entry: %v", err)
+	}
+
+	path := filepath.Join(transcriptDir, entry.SessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	legacy := map[string]any{
+		"type": "message",
+		"role": "assistant",
+		"text": "legacy",
+		"at":   time.Now().UTC(),
+	}
+	b, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+		t.Fatalf("write legacy transcript: %v", err)
+	}
+
+	page, err := mgr.HistoryPageFiltered(entry.SessionKey, HistoryFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("history page: %v", err)
+	}
+	if len(page.Messages) != 1 {
+		t.Fatalf("expected one record, got %d", len(page.Messages))
+	}
+	got := page.Messages[0]
+	if got.SchemaVersion != 1 || got.EventType != "message" {
+		t.Fatalf("legacy normalization mismatch: %#v", got)
+	}
+	if got.SessionID != entry.SessionID || got.SessionKey != entry.SessionKey || got.AgentID != entry.AgentID {
+		t.Fatalf("legacy identity fields missing after normalization: %#v", got)
+	}
+	if !strings.EqualFold(got.Text, "legacy") {
+		t.Fatalf("unexpected text: %#v", got)
 	}
 }
 

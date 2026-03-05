@@ -316,6 +316,9 @@ func (s *Server) WSHandler() http.Handler {
 							"runId":      evtRunID,
 							"sessionKey": evt.SessionKey,
 							"text":       evt.Text,
+							"provider":   evt.Provider,
+							"toolCall":   evt.ToolCall,
+							"usage":      evt.Usage,
 							"done":       evt.Done,
 							"aborted":    evt.Aborted,
 						})

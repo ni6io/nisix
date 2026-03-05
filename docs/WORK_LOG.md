@@ -135,3 +135,33 @@ Use this as the running handoff log between sessions.
 
 ### Next Session First Step
 - Add `/skills show <name>` or `/tools show <name>` command to inspect details/schema quickly from chat.
+
+## 2026-03-05 18:13 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Implemented transcript schema v2 in session storage:
+  - Extended transcript record fields with `schemaVersion`, `eventType`, `runId`, `kind`, `provider`, `toolCall`, `usage`, and `metadata`.
+  - Added `AppendWithOptions(...)` to preserve old `Append(...)` API while supporting richer writes.
+  - Added record normalization on history reads for backward-compatible handling of legacy v1 rows.
+- Wired gateway/runtime to write richer transcript rows:
+  - User input now stores metadata (`channel/account/peer/user/thread`) and run context.
+  - Assistant events now store event-kind mapping (`message`, `message_chunk`, `tool_call`, `event`) with run/provider/tool metadata.
+  - Tool events now carry structured `toolCall` details from runtime.
+- Extended WS agent event payload to include `provider`, `toolCall`, and `usage`.
+- Added/updated tests:
+  - Session manager tests for v2 write + legacy normalization.
+  - Gateway integration test asserting `tool_call` row with `runId` appears in `chat.history`.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- Streaming/block events are now persisted as transcript rows (`eventType=message_chunk`), which increases transcript volume for long outputs.
+
+### Next Session First Step
+- Add `chat.history` filter by `eventType` to make retrieval of only final/tool rows efficient for UIs.

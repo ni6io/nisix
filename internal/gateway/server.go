@@ -190,7 +190,20 @@ func (s *Server) handleInbound(
 			return err
 		}
 		sessionEntry = e
-		if err := s.sessions.Append(e, "user", msg.Text); err != nil {
+		if err := s.sessions.AppendWithOptions(e, "user", msg.Text, sessions.AppendOptions{
+			EventType: "message",
+			RunID:     strings.TrimSpace(msg.RunID),
+			Kind:      "input",
+			Provider:  "runtime",
+			Metadata: map[string]string{
+				"channel":   msg.Channel,
+				"accountId": msg.AccountID,
+				"peerId":    msg.PeerID,
+				"peerType":  string(msg.PeerType),
+				"userId":    msg.UserID,
+				"threadId":  msg.ThreadID,
+			},
+		}); err != nil {
 			return err
 		}
 	}
@@ -221,11 +234,65 @@ func (s *Server) handleInbound(
 		}); err != nil {
 			return err
 		}
-		if s.sessions != nil && evt.Done {
-			if err := s.sessions.Append(sessionEntry, "assistant", evt.Text); err != nil {
+		if s.sessions != nil {
+			if err := s.sessions.AppendWithOptions(sessionEntry, "assistant", evt.Text, sessions.AppendOptions{
+				EventType: mapAgentEventType(evt.Kind),
+				RunID:     firstNonEmpty(strings.TrimSpace(evt.RunID), strings.TrimSpace(msg.RunID)),
+				Kind:      evt.Kind,
+				Provider:  evt.Provider,
+				Aborted:   evt.Aborted,
+				ToolCall:  mapToolCall(evt.ToolCall),
+				Usage:     mapUsage(evt.Usage),
+			}); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func mapAgentEventType(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "tool":
+		return "tool_call"
+	case "block":
+		return "message_chunk"
+	case "final":
+		return "message"
+	default:
+		return "event"
+	}
+}
+
+func mapToolCall(v *domain.ToolCall) *sessions.ToolCallRecord {
+	if v == nil {
+		return nil
+	}
+	return &sessions.ToolCallRecord{
+		Name:   v.Name,
+		Input:  v.Input,
+		Output: v.Output,
+		Error:  v.Error,
+		Status: v.Status,
+	}
+}
+
+func mapUsage(v *domain.Usage) *sessions.UsageRecord {
+	if v == nil {
+		return nil
+	}
+	return &sessions.UsageRecord{
+		InputTokens:  v.InputTokens,
+		OutputTokens: v.OutputTokens,
+		TotalTokens:  v.TotalTokens,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

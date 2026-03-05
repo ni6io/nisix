@@ -243,6 +243,38 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	if len(messages) == 0 {
 		t.Fatalf("expected non-empty history")
 	}
+
+	mustSendReq(t, conn, map[string]any{
+		"type":   "req",
+		"id":     "6a",
+		"method": "chat.send",
+		"params": map[string]any{
+			"channel":   "telegram",
+			"accountId": "default",
+			"peerId":    "123",
+			"peerType":  "direct",
+			"userId":    "123",
+			"text":      "!tool time_now",
+		},
+	})
+	_ = readUntilAgentDoneAndGetText(t, conn, "6a", 3*time.Second)
+
+	mustSendReq(t, conn, map[string]any{
+		"type":   "req",
+		"id":     "6b",
+		"method": "chat.history",
+		"params": map[string]any{
+			"sessionKey": "agent:main:telegram:default:dm:123",
+			"limit":      200,
+		},
+	})
+	frame = mustReadFrame(t, conn, 2*time.Second)
+	if frame["id"] != "6b" || frame["ok"] != true {
+		t.Fatalf("unexpected chat.history response: %#v", frame)
+	}
+	payload = frame["payload"].(map[string]any)
+	messages = payload["messages"].([]any)
+	assertHistoryHasToolCall(t, messages, "time_now")
 }
 
 func TestWSChatHistoryFilters(t *testing.T) {
@@ -741,4 +773,27 @@ func containsString(list []any, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertHistoryHasToolCall(t *testing.T, messages []any, toolName string) {
+	t.Helper()
+	for _, item := range messages {
+		msg := item.(map[string]any)
+		eventType, _ := msg["eventType"].(string)
+		if eventType != "tool_call" {
+			continue
+		}
+		runID, _ := msg["runId"].(string)
+		if strings.TrimSpace(runID) == "" {
+			t.Fatalf("expected runId on tool_call record: %#v", msg)
+		}
+		toolCall, ok := msg["toolCall"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected toolCall payload: %#v", msg)
+		}
+		if toolCall["name"] == toolName {
+			return
+		}
+	}
+	t.Fatalf("tool_call record for %s not found in history: %#v", toolName, messages)
 }
