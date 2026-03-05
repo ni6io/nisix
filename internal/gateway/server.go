@@ -13,6 +13,7 @@ import (
 	"github.com/ni6io/nisix/internal/security"
 	"github.com/ni6io/nisix/internal/sessions"
 	"github.com/ni6io/nisix/internal/skills"
+	"github.com/ni6io/nisix/internal/tools"
 	"github.com/ni6io/nisix/internal/workspace"
 )
 
@@ -43,6 +44,7 @@ type Server struct {
 	profileSvc   *profile.Service
 	bootstrapSvc *bootstrap.Service
 	skillSvc     *skills.Service
+	toolsReg     *tools.Registry
 	workspace    string
 	log          *slog.Logger
 }
@@ -56,6 +58,7 @@ func New(
 	profileService *profile.Service,
 	bootstrapService *bootstrap.Service,
 	skillService *skills.Service,
+	toolsRegistry *tools.Registry,
 	workspaceDir string,
 	logger *slog.Logger,
 ) *Server {
@@ -68,6 +71,7 @@ func New(
 		profileSvc:   profileService,
 		bootstrapSvc: bootstrapService,
 		skillSvc:     skillService,
+		toolsReg:     toolsRegistry,
 		workspace:    workspaceDir,
 		log:          logger,
 	}
@@ -123,6 +127,13 @@ func (s *Server) SkillsList(enabledOnly bool) ([]skills.SkillStatus, error) {
 		})
 	}
 	return out, nil
+}
+
+func (s *Server) ToolsCatalog() []tools.Metadata {
+	if s.toolsReg == nil {
+		return []tools.Metadata{}
+	}
+	return s.toolsReg.Catalog()
 }
 
 func (s *Server) ProfileGet(file string) (profile.GetResult, error) {

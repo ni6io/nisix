@@ -154,6 +154,7 @@ func (s *Server) WSHandler() http.Handler {
 							"chat.history",
 							"sessions.list",
 							"skills.list",
+							"tools.catalog",
 							"profile.get",
 							"profile.update",
 							"bootstrap.status",
@@ -202,6 +203,13 @@ func (s *Server) WSHandler() http.Handler {
 					continue
 				}
 				if err := sendRes(req.ID, true, map[string]any{"skills": skillsList}, nil); err != nil {
+					return
+				}
+
+			case "tools.catalog":
+				var p protocol.ToolsCatalogParams
+				_ = decodeParams(req.Params, &p)
+				if err := sendRes(req.ID, true, map[string]any{"tools": s.ToolsCatalog()}, nil); err != nil {
 					return
 				}
 

@@ -142,6 +142,7 @@ func main() {
 		profileSvc,
 		bootstrapSvc,
 		skillsSvc,
+		reg,
 		workspaceDir,
 		logger,
 	)
