@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./workspace/main"
+      ],
+      "env": {},
+      "cwd": ".",
+      "headers": {},
+      "timeoutSec": 60
+    },
+    "remote_streamable": {
+      "transport": "streamable_http",
+      "url": "http://127.0.0.1:3001/mcp",
+      "headers": {
+        "Authorization": "Bearer <TOKEN>"
+      },
+      "timeoutSec": 60
+    },
+    "remote_sse": {
+      "transport": "sse",
+      "url": "http://127.0.0.1:3002/sse",
+      "messageUrl": "http://127.0.0.1:3002/messages",
+      "headers": {
+        "Authorization": "Bearer <TOKEN>"
+      },
+      "timeoutSec": 60
+    }
+  }
+}

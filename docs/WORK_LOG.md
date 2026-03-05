@@ -240,3 +240,92 @@ Use this as the running handoff log between sessions.
 ### Next Session First Step
 - Add `mcp.status`/`mcp.tools` debug command in chat/WS to inspect loaded MCP servers and tool mappings at runtime.
 
+
+## 2026-03-05 22:01 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Extended MCP runtime transport support in `internal/mcp`:
+  - Added transport selection per server config: `stdio`, `streamable_http`, `sse`.
+  - Kept existing stdio behavior.
+  - Added HTTP JSON-RPC request flow for `streamable_http`.
+  - Added SSE endpoint discovery (`event: endpoint`) + async JSON-RPC response handling for legacy `sse` transport.
+- Expanded MCP server config schema (`internal/mcp/loader.go`):
+  - New fields: `transport`, `url`, `messageUrl`, `headers`, `timeoutSec`.
+- Added coverage for all supported transports (`internal/mcp/loader_test.go`):
+  - stdio helper process test.
+  - streamable_http test via `httptest` server.
+  - sse test via `httptest` SSE + message endpoint.
+- Updated MCP docs/examples:
+  - `mcp.json.example` includes stdio + streamable_http + sse samples.
+  - `README.md` MCP section now lists supported transports and config format.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- SSE implementation focuses on request/response flows and endpoint discovery; server-initiated notifications are ignored for now.
+- WebSocket MCP transport is not implemented.
+
+### Next Session First Step
+- Add optional websocket MCP transport if needed by target servers.
+
+## 2026-03-05 22:24 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Applied MCP transport best-practice fixes after review findings in `internal/mcp/client.go`:
+  - Decoupled HTTP request timeout from transport-level client timeout to avoid accidental SSE stream termination.
+  - Added per-request timeout handling (`withRequestTimeout`) for HTTP POST requests only.
+  - Added parsing support for `text/event-stream` response bodies in `streamable_http` path and extraction of matching JSON-RPC response by `id`.
+- Extended tests in `internal/mcp/loader_test.go`:
+  - Added `TestRegisterFromFileStreamableHTTPEventStreamResponse` to verify streamable HTTP works when response is SSE-framed.
+  - Hardened SSE test with low timeout (`timeoutSec=1`) + delayed call to prove stream is not force-closed by request timeout.
+- Updated docs wording in `README.md` module list to reflect multi-transport MCP support.
+
+### Validation
+- `go test ./internal/mcp -v`: pass
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- `streamable_http` currently supports SSE response parsing for matching JSON-RPC responses, but does not expose server-initiated notifications to upper layers yet.
+
+### Next Session First Step
+- Add optional surfaced event channel for MCP server notifications (progress/log events) if product needs them.
+
+## 2026-03-05 22:24 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Applied additional MCP runtime hardening and compatibility updates:
+  - Added support for `type` as an alias of `transport` in `mcp.json` server entries.
+  - Added alias `streamable-http` and `http` -> `streamable_http` transport resolution.
+  - Improved transport inference when `transport/type` is omitted: prefer `sse` if `messageUrl` is provided; otherwise infer `streamable_http` for URL-based servers.
+- Improved pending-request failure behavior on transport shutdown:
+  - `stdio` and `sse` reader loops now fail pending RPC calls when stream ends/errors.
+  - `stdio` wait loop now fails pending RPC calls even when process exits cleanly.
+- Added regression coverage:
+  - `TestRegisterFromFileTypeAliasHTTP` validates `type: "http"` works end-to-end.
+- Updated README MCP notes:
+  - Documented `transport`/`type` compatibility and `http` alias behavior.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- WebSocket MCP transport is still not implemented; current scope covers stdio + streamable HTTP + legacy SSE.
+
+### Next Session First Step
+- Add optional MCP WebSocket transport only if target servers require it in production.
