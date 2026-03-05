@@ -80,3 +80,30 @@ Use this as the running handoff log between sessions.
 
 ### Next Session First Step
 - Implement structured tool invocation flow (model/tool-call protocol) to move beyond manual `!tool` command path.
+
+## 2026-03-05 17:52 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `codex/tools-catalog-introspection`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Fixed runtime behavior where model output could stop at a tool "plan" (e.g. `SERVER_TIME_NOW: time_now()`) without executing the tool.
+- Added a model-output tool-call bridge in runtime:
+  - Parse strict tool-call lines from generated text.
+  - Execute matched registered tool via existing policy guardrails.
+  - Return concrete final output for `time_now` as `Server time now: <RFC3339>`.
+  - Emit tool event before final response when execution succeeds.
+- Added tests in `internal/agentruntime/runtime_model_test.go`:
+  - executes tool call emitted by model output.
+  - enforces deny policy for model-emitted tool call.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- Current parser intentionally supports one simple call pattern per line; full multi-tool/function-call protocol remains a future step.
+
+### Next Session First Step
+- Migrate this bridge to structured model function-calling payloads (provider-native) and support typed arguments.
