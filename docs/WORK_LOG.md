@@ -165,3 +165,78 @@ Use this as the running handoff log between sessions.
 
 ### Next Session First Step
 - Add `chat.history` filter by `eventType` to make retrieval of only final/tool rows efficient for UIs.
+
+## 2026-03-05 21:47 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `753efcb`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Implemented P3 multi-account Telegram runtime support:
+  - Extended config schema with `channels.telegramAccounts[]` and per-account `accountId`.
+  - Added Telegram config defaults/validation for both legacy single block and multi-account list.
+  - Added duplicate `accountId` detection and required-token validation for enabled Telegram accounts.
+- Updated Telegram channel routing/runtime:
+  - `internal/channels.MultiHub` now supports account-aware sender mapping via `RegisterAccount(channel, accountId, sender)`.
+  - `internal/channels.TelegramAdapter` now carries configured `accountId` and emits inbound messages with that account id (no hardcoded `default`).
+  - `cmd/nisixd/main.go` now boots multiple Telegram adapters (legacy `channels.telegram` + `channels.telegramAccounts`) and starts polling per enabled account.
+- Added/updated tests:
+  - `internal/channels/hub_test.go` for channel+account dispatch behavior.
+  - `internal/channels/telegram_test.go` for accountId normalization/defaulting.
+  - `internal/config/config_test.go` for telegram account defaults and duplicate account validation.
+- Updated docs/config samples:
+  - `configs/nisix.example.json` and `configs/nisix.local.example.json` include `accountId` and `telegramAccounts` examples.
+  - `README.md` Telegram section documents multi-account config and account-aware routing.
+  - `docs/PROJECT_TRACKER.md` marks P3 as done and records feature in current state.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+- Manual checks:
+  - Verified default + account-specific hub routing behavior via unit tests.
+
+### Risks / Follow-up
+- When both `channels.telegram` and `channels.telegramAccounts` are enabled, account IDs must be unique; startup now fails fast on duplicates.
+
+### Next Session First Step
+- Implement P4 foundation: define typed plugin runtime interfaces and initial sandbox policy contract.
+
+## 2026-03-05 22:12 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `753efcb`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Added MCP tool runtime support with `mcp.json` definitions:
+  - New package `internal/mcp` with stdio MCP client (initialize, tools/list, tools/call).
+  - Added loader to read `mcp.json`, start configured servers, discover tools, and register them into tool registry.
+  - MCP tools are exposed as local tool names: `mcp_<server>_<tool>`.
+- Wired daemon startup to load MCP tools from config:
+  - Added `mcp` config section (`enabled`, `configFile`, `toolPrefix`) with defaults.
+  - Startup now loads MCP tools before runtime initialization and closes MCP clients on shutdown.
+- Added tests:
+  - `internal/mcp/loader_test.go` with helper MCP stdio server process.
+  - `internal/config/config_test.go` assertions for new MCP defaults.
+- Updated docs/config examples:
+  - `README.md` MCP section.
+  - `configs/nisix.example.json` and `configs/nisix.local.example.json` with `mcp` config block.
+  - Added `mcp.json.example` and ignored local `mcp.json` in `.gitignore`.
+  - Updated tracker completed list with MCP runtime item.
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+- Manual checks:
+  - Verified MCP package unit test executes real stdio JSON-RPC flow (initialize/list/call).
+
+### Risks / Follow-up
+- Current MCP implementation supports stdio transport only (no SSE/streaming transport yet).
+- Tool name sanitization may produce suffixes (`_2`, `_3`) on collisions; document naming if UI needs stable explicit mapping.
+
+### Next Session First Step
+- Add `mcp.status`/`mcp.tools` debug command in chat/WS to inspect loaded MCP servers and tool mappings at runtime.
+

@@ -37,6 +37,11 @@ Goal: OpenClaw-aligned assistant runtime in Go with Telegram + WS control plane.
   - `echo`
   - `openai` / `codex`
   - `ollama`
+- MCP tools runtime:
+  - load MCP stdio server definitions from `mcp.json`
+  - register MCP tools in tool registry as `mcp_<server>_<tool>`
+  - execute MCP `tools/call` through runtime tool pipeline
+- Telegram runtime: multi-account support via `channels.telegram` + `channels.telegramAccounts` with account-aware outbound routing.
 
 ### Decisions Locked
 
@@ -53,7 +58,7 @@ Status legend: `todo`, `in_progress`, `done`, `blocked`.
 |---|---|---|---|
 | P1 | `tools.catalog` WS method + tool schema introspection | done | Added WS method + catalog metadata/schema from tool registry |
 | P2 | Transcript schema v2 (tool calls + metadata + usage) | done | Added v2 fields + backward-compatible history normalization |
-| P3 | Multi-account Telegram support | todo | Requires config/routing expansion |
+| P3 | Multi-account Telegram support | done | Added `channels.telegramAccounts` + account-aware hub/adapters |
 | P4 | Typed plugin runtime + sandbox policy | todo | Larger architecture step |
 | P5 | Session observability pack (`runId/sessionKey` dashboards/log conventions) | todo | Useful for production operations |
 
@@ -75,3 +80,4 @@ Update this file when:
 1. A feature is added/removed.
 2. A decision (default behavior) changes.
 3. Backlog priorities are reordered.
+

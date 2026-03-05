@@ -114,3 +114,15 @@ func TestTelegramUpdateDedupe(t *testing.T) {
 		t.Fatal("expected evicted update id not duplicate")
 	}
 }
+
+func TestTelegramAccountIDOption(t *testing.T) {
+	a := NewTelegramAdapter("x")
+	if a.accountID != "default" {
+		t.Fatalf("expected default account id, got %q", a.accountID)
+	}
+
+	b := NewTelegramAdapter("x", TelegramOptions{AccountID: "Work_Bot"})
+	if b.accountID != "work_bot" {
+		t.Fatalf("expected normalized account id work_bot, got %q", b.accountID)
+	}
+}

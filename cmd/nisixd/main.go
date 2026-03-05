@@ -150,28 +150,36 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if cfg.Channels.Telegram.Enabled {
-		telegram := channels.NewTelegramAdapter(cfg.Channels.Telegram.Token, channels.TelegramOptions{
-			BotUsername:            cfg.Channels.Telegram.BotUsername,
-			AutoDetectBotUsername:  cfg.Channels.Telegram.AutoDetectBotUsernameValue(),
-			RequireMentionInGroups: cfg.Channels.Telegram.RequireMentionInGroupsValue(),
-			EnableHelpCommands:     cfg.Channels.Telegram.EnableHelpCommandsValue(),
-			MinUserIntervalMs:      cfg.Channels.Telegram.MinUserIntervalMs,
-			DedupeWindow:           cfg.Channels.Telegram.DedupeWindow,
-			AllowlistMode:          cfg.Channels.Telegram.AllowlistMode,
-			AllowUsers:             cfg.Channels.Telegram.AllowUsers,
-			AllowChats:             cfg.Channels.Telegram.AllowChats,
+	telegramAccounts := collectEnabledTelegramAccounts(cfg.Channels)
+	for i, accountCfg := range telegramAccounts {
+		telegram := channels.NewTelegramAdapter(accountCfg.Token, channels.TelegramOptions{
+			AccountID:              accountCfg.AccountIDValue(),
+			BotUsername:            accountCfg.BotUsername,
+			AutoDetectBotUsername:  accountCfg.AutoDetectBotUsernameValue(),
+			RequireMentionInGroups: accountCfg.RequireMentionInGroupsValue(),
+			EnableHelpCommands:     accountCfg.EnableHelpCommandsValue(),
+			MinUserIntervalMs:      accountCfg.MinUserIntervalMs,
+			DedupeWindow:           accountCfg.DedupeWindow,
+			AllowlistMode:          accountCfg.AllowlistMode,
+			AllowUsers:             accountCfg.AllowUsers,
+			AllowChats:             accountCfg.AllowChats,
 		})
-		hub.Register("telegram", telegram)
-		logger.Info("telegram.adapter.enabled")
-		if cfg.Channels.Telegram.Polling {
+		if i == 0 {
+			hub.Register("telegram", telegram)
+		}
+		hub.RegisterAccount("telegram", accountCfg.AccountIDValue(), telegram)
+		logger.Info("telegram.adapter.enabled", "accountId", accountCfg.AccountIDValue(), "polling", accountCfg.Polling)
+
+		if accountCfg.Polling {
+			adapter := telegram
+			cfgCopy := accountCfg
 			go func() {
-				logger.Info("telegram.polling.start")
-				err := telegram.RunPolling(ctx, func(msg domain.InboundMessage) error {
+				logger.Info("telegram.polling.start", "accountId", cfgCopy.AccountIDValue())
+				err := adapter.RunPolling(ctx, func(msg domain.InboundMessage) error {
 					return srv.HandleInbound(ctx, cfg.Gateway.Token, msg)
 				})
 				if err != nil && !errors.Is(err, context.Canceled) {
-					logger.Error("telegram.polling.error", "err", err)
+					logger.Error("telegram.polling.error", "accountId", cfgCopy.AccountIDValue(), "err", err)
 				}
 			}()
 		}
@@ -292,4 +300,17 @@ func buildModelClient(cfg config.ModelConfig) (model.Client, error) {
 	default:
 		return nil, fmt.Errorf("unknown model.provider: %s", cfg.Provider)
 	}
+}
+
+func collectEnabledTelegramAccounts(ch config.ChannelsConfig) []config.TelegramConfig {
+	out := make([]config.TelegramConfig, 0, 1+len(ch.TelegramAccounts))
+	if ch.Telegram.Enabled {
+		out = append(out, ch.Telegram)
+	}
+	for _, account := range ch.TelegramAccounts {
+		if account.Enabled {
+			out = append(out, account)
+		}
+	}
+	return out
 }

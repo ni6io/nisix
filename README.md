@@ -17,6 +17,7 @@ Go skeleton for your OpenClaw-inspired assistant architecture.
 - `identity`: loads `IDENTITY.md`.
 - `soul`: loads `SOUL.md`.
 - `tools`: tool registry + sample `time_now` tool.
+- `mcp`: loads MCP stdio servers from `mcp.json` and registers remote MCP tools.
 - `toolpolicy`: allow/deny policy checks.
 - `sessions`: persistent `sessions.json` + transcript JSONL appends.
 - `memory`: workspace markdown search service.
@@ -145,6 +146,7 @@ Configure in `configs/nisix.example.json`:
 ```json
 "channels": {
   "telegram": {
+    "accountId": "default",
     "enabled": true,
     "token": "<BOT_TOKEN>",
     "polling": true,
@@ -157,20 +159,35 @@ Configure in `configs/nisix.example.json`:
     "allowlistMode": "users",
     "allowUsers": ["<ADMIN_TELEGRAM_USER_ID>"],
     "allowChats": []
-  }
+  },
+  "telegramAccounts": [
+    {
+      "accountId": "work-bot",
+      "enabled": true,
+      "token": "<SECOND_BOT_TOKEN>",
+      "polling": true,
+      "botUsername": "",
+      "allowlistMode": "users",
+      "allowUsers": ["<ADMIN_TELEGRAM_USER_ID>"],
+      "allowChats": []
+    }
+  ]
 }
 ```
 
-When enabled:
+Notes:
 
-- inbound updates are read via `getUpdates` long-polling
-- outbound assistant replies are sent via `sendMessage`
-- duplicate `update_id` events are ignored in-memory (`dedupeWindow`)
-- per-user inbound throttling is enforced (`minUserIntervalMs`)
-- `/start` and `/help` are handled by the adapter when `enableHelpCommands=true`
-- in group chats, messages require `@botUsername` when `requireMentionInGroups=true`
-- if `botUsername` is empty and `autoDetectBotUsername=true`, adapter resolves it from `getMe`
-- optional allowlist policy modes: `off`, `users`, `chats`, `users_or_chats`, `users_and_chats`
+- `channels.telegram` is the legacy single-account block and is still supported.
+- `channels.telegramAccounts` lets you enable multiple Telegram bot accounts in the same runtime.
+- each enabled account must have a unique `accountId`.
+- inbound updates carry the configured `accountId`, so router bindings can target specific agents.
+- outbound replies are routed by `channel + accountId`; if no account match is found, channel fallback is used.
+- duplicate `update_id` events are ignored in-memory (`dedupeWindow`).
+- per-user inbound throttling is enforced (`minUserIntervalMs`).
+- `/start` and `/help` are handled by the adapter when `enableHelpCommands=true`.
+- in group chats, messages require `@botUsername` when `requireMentionInGroups=true`.
+- if `botUsername` is empty and `autoDetectBotUsername=true`, adapter resolves it from `getMe`.
+- optional allowlist policy modes: `off`, `users`, `chats`, `users_or_chats`, `users_and_chats`.
 
 ## Model provider
 
@@ -206,6 +223,36 @@ ollama serve
 ollama pull llama3.2
 ```
 
+
+## MCP tools from mcp.json
+
+Add MCP settings in runtime config:
+
+```json
+"mcp": {
+  "enabled": true,
+  "configFile": "./mcp.json",
+  "toolPrefix": "mcp"
+}
+```
+
+Define MCP servers in `mcp.json` (see `mcp.json.example`):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace/main"],
+      "env": {},
+      "cwd": "."
+    }
+  }
+}
+```
+
+At startup, nisix discovers MCP tools and registers them as local tool names using the pattern `mcp_<server>_<tool>`.
+If `tools.allow` is non-empty, include the generated MCP tool names there as well.
 ## Skills V1
 
 Workspace folder layout:
@@ -320,7 +367,12 @@ Migration note:
 
 ## Next build steps
 
-1. Add `tools.catalog` and tool schema discovery to WS protocol.
-2. Add richer transcript schema (tool calls, metadata, usage).
-3. Add multi-account Telegram support.
-4. Add typed plugin/skill runtime + sandboxed tool execution.
+1. Add `chat.history` filter by `eventType` for efficient UI retrieval.
+2. Add typed plugin/skill runtime + sandboxed tool execution.
+3. Add session observability pack (`runId/sessionKey` logging conventions and dashboards).
+4. Migrate model-output tool bridge to provider-native structured function calling.
+
+
+
+
+

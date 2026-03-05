@@ -17,6 +17,7 @@ import (
 )
 
 type TelegramAdapter struct {
+	accountID              string
 	token                  string
 	client                 *http.Client
 	apiBaseURL             string
@@ -36,6 +37,7 @@ type TelegramAdapter struct {
 }
 
 type TelegramOptions struct {
+	AccountID              string
 	APIBaseURL             string
 	BotUsername            string
 	AutoDetectBotUsername  bool
@@ -50,6 +52,7 @@ type TelegramOptions struct {
 
 func NewTelegramAdapter(token string, options ...TelegramOptions) *TelegramAdapter {
 	cfg := TelegramOptions{
+		AccountID:              "default",
 		APIBaseURL:             "https://api.telegram.org",
 		AutoDetectBotUsername:  true,
 		RequireMentionInGroups: true,
@@ -60,6 +63,9 @@ func NewTelegramAdapter(token string, options ...TelegramOptions) *TelegramAdapt
 	}
 	if len(options) > 0 {
 		cfg = options[0]
+		if strings.TrimSpace(cfg.AccountID) == "" {
+			cfg.AccountID = "default"
+		}
 		if strings.TrimSpace(cfg.APIBaseURL) == "" {
 			cfg.APIBaseURL = "https://api.telegram.org"
 		}
@@ -75,7 +81,8 @@ func NewTelegramAdapter(token string, options ...TelegramOptions) *TelegramAdapt
 	}
 
 	return &TelegramAdapter{
-		token: strings.TrimSpace(token),
+		accountID: normalizeAccountID(cfg.AccountID),
+		token:     strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 40 * time.Second,
 		},
@@ -215,7 +222,7 @@ func (t *TelegramAdapter) RunPolling(
 			}
 			inbound := domain.InboundMessage{
 				Channel:   "telegram",
-				AccountID: "default",
+				AccountID: t.accountID,
 				PeerID:    strconv.FormatInt(msg.Chat.ID, 10),
 				PeerType:  mapTelegramChatType(msg.Chat.Type),
 				UserID:    userID,
@@ -332,6 +339,14 @@ func normalizeAllowlistMode(v string) string {
 	default:
 		return "off"
 	}
+}
+
+func normalizeAccountID(v string) string {
+	id := strings.ToLower(strings.TrimSpace(v))
+	if id == "" {
+		return "default"
+	}
+	return id
 }
 
 func normalizeUsername(v string) string {

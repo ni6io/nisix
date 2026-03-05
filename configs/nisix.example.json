@@ -64,6 +64,11 @@
     ],
     "deny": []
   },
+  "mcp": {
+    "enabled": true,
+    "configFile": "./mcp.json",
+    "toolPrefix": "mcp"
+  },
   "memory": {
     "enabled": true,
     "autoLoadScope": "dm_only"
@@ -95,6 +100,7 @@
   },
   "channels": {
     "telegram": {
+      "accountId": "default",
       "enabled": true,
       "token": "YOUR_TELEGRAM_BOT_TOKEN",
       "polling": true,
@@ -109,6 +115,26 @@
         "*"
       ],
       "allowChats": []
-    }
+    },
+    "telegramAccounts": [
+      {
+        "accountId": "work-bot",
+        "enabled": false,
+        "token": "YOUR_SECOND_TELEGRAM_BOT_TOKEN",
+        "polling": true,
+        "botUsername": "NISIX_WORK",
+        "autoDetectBotUsername": true,
+        "requireMentionInGroups": true,
+        "enableHelpCommands": true,
+        "minUserIntervalMs": 700,
+        "dedupeWindow": 2048,
+        "allowlistMode": "users",
+        "allowUsers": [
+          "*"
+        ],
+        "allowChats": []
+      }
+    ]
   }
 }
+

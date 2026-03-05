@@ -3,7 +3,9 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -12,6 +14,7 @@ type Config struct {
 	Bindings  []BindingRule   `json:"bindings"`
 	Session   SessionConfig   `json:"session"`
 	Tools     ToolsConfig     `json:"tools"`
+	MCP       MCPConfig       `json:"mcp"`
 	Memory    MemoryConfig    `json:"memory"`
 	Skills    SkillsConfig    `json:"skills"`
 	Model     ModelConfig     `json:"model"`
@@ -57,6 +60,12 @@ type ToolsConfig struct {
 	Profile string   `json:"profile"`
 	Allow   []string `json:"allow"`
 	Deny    []string `json:"deny"`
+}
+
+type MCPConfig struct {
+	Enabled    *bool  `json:"enabled"`
+	ConfigFile string `json:"configFile"`
+	ToolPrefix string `json:"toolPrefix"`
 }
 
 type MemoryConfig struct {
@@ -112,10 +121,12 @@ type ProfileConfig struct {
 }
 
 type ChannelsConfig struct {
-	Telegram TelegramConfig `json:"telegram"`
+	Telegram         TelegramConfig   `json:"telegram"`
+	TelegramAccounts []TelegramConfig `json:"telegramAccounts"`
 }
 
 type TelegramConfig struct {
+	AccountID              string   `json:"accountId"`
 	Enabled                bool     `json:"enabled"`
 	Token                  string   `json:"token"`
 	Polling                bool     `json:"polling"`
@@ -151,6 +162,10 @@ func (c TelegramConfig) AutoDetectBotUsernameValue() bool {
 	return *c.AutoDetectBotUsername
 }
 
+func (c TelegramConfig) AccountIDValue() string {
+	return normalizeAccountID(c.AccountID)
+}
+
 func (c WorkspaceConfig) BootstrapFromTemplatesValue() bool {
 	if c.BootstrapFromTemplates == nil {
 		return true
@@ -179,6 +194,13 @@ func (c SkillsConfig) AutoMatchValue() bool {
 	return *c.AutoMatch
 }
 
+func (c MCPConfig) EnabledValue() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
+}
+
 func Load(path string) (Config, error) {
 	var cfg Config
 	b, err := os.ReadFile(path)
@@ -199,6 +221,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Session.StateDir == "" {
 		cfg.Session.StateDir = "./state"
+	}
+	if cfg.MCP.ConfigFile == "" {
+		cfg.MCP.ConfigFile = "./mcp.json"
+	}
+	if cfg.MCP.ToolPrefix == "" {
+		cfg.MCP.ToolPrefix = "mcp"
 	}
 	if cfg.Skills.MaxInjected <= 0 {
 		cfg.Skills.MaxInjected = 1
@@ -267,34 +295,89 @@ func Load(path string) (Config, error) {
 			"MEMORY.md",
 		}
 	}
-	switch cfg.Channels.Telegram.AllowlistMode {
-	case "", "off", "users", "chats", "users_or_chats", "users_and_chats":
-		if cfg.Channels.Telegram.AllowlistMode == "" {
-			cfg.Channels.Telegram.AllowlistMode = "off"
-		}
-	default:
-		cfg.Channels.Telegram.AllowlistMode = "off"
+
+	applyTelegramDefaults(&cfg.Channels.Telegram)
+	for i := range cfg.Channels.TelegramAccounts {
+		applyTelegramDefaults(&cfg.Channels.TelegramAccounts[i])
 	}
-	if cfg.Channels.Telegram.MinUserIntervalMs < 0 {
-		cfg.Channels.Telegram.MinUserIntervalMs = 0
+	if err := validateTelegramAccounts(cfg.Channels); err != nil {
+		return cfg, err
 	}
-	if cfg.Channels.Telegram.MinUserIntervalMs == 0 {
-		cfg.Channels.Telegram.MinUserIntervalMs = 700
-	}
-	if cfg.Channels.Telegram.DedupeWindow <= 0 {
-		cfg.Channels.Telegram.DedupeWindow = 2048
-	}
-	if cfg.Channels.Telegram.AllowlistMode == "off" {
-		if len(cfg.Channels.Telegram.AllowUsers) > 0 && len(cfg.Channels.Telegram.AllowChats) > 0 {
-			cfg.Channels.Telegram.AllowlistMode = "users_or_chats"
-		} else if len(cfg.Channels.Telegram.AllowUsers) > 0 {
-			cfg.Channels.Telegram.AllowlistMode = "users"
-		} else if len(cfg.Channels.Telegram.AllowChats) > 0 {
-			cfg.Channels.Telegram.AllowlistMode = "chats"
-		}
-	}
+
 	if len(cfg.Agents.List) == 0 {
 		return cfg, errors.New("config: agents.list is required")
 	}
 	return cfg, nil
+}
+
+func applyTelegramDefaults(cfg *TelegramConfig) {
+	cfg.AccountID = normalizeAccountID(cfg.AccountID)
+	switch cfg.AllowlistMode {
+	case "", "off", "users", "chats", "users_or_chats", "users_and_chats":
+		if cfg.AllowlistMode == "" {
+			cfg.AllowlistMode = "off"
+		}
+	default:
+		cfg.AllowlistMode = "off"
+	}
+	if cfg.MinUserIntervalMs < 0 {
+		cfg.MinUserIntervalMs = 0
+	}
+	if cfg.MinUserIntervalMs == 0 {
+		cfg.MinUserIntervalMs = 700
+	}
+	if cfg.DedupeWindow <= 0 {
+		cfg.DedupeWindow = 2048
+	}
+	if cfg.AllowlistMode == "off" {
+		if len(cfg.AllowUsers) > 0 && len(cfg.AllowChats) > 0 {
+			cfg.AllowlistMode = "users_or_chats"
+		} else if len(cfg.AllowUsers) > 0 {
+			cfg.AllowlistMode = "users"
+		} else if len(cfg.AllowChats) > 0 {
+			cfg.AllowlistMode = "chats"
+		}
+	}
+}
+
+func validateTelegramAccounts(ch ChannelsConfig) error {
+	seen := map[string]struct{}{}
+	register := func(accountID string) error {
+		if _, exists := seen[accountID]; exists {
+			return fmt.Errorf("config: duplicate telegram accountId %q", accountID)
+		}
+		seen[accountID] = struct{}{}
+		return nil
+	}
+
+	if ch.Telegram.Enabled {
+		if strings.TrimSpace(ch.Telegram.Token) == "" {
+			return errors.New("config: channels.telegram.token is required when enabled")
+		}
+		if err := register(ch.Telegram.AccountIDValue()); err != nil {
+			return err
+		}
+	}
+
+	for i, account := range ch.TelegramAccounts {
+		if !account.Enabled {
+			continue
+		}
+		if strings.TrimSpace(account.Token) == "" {
+			return fmt.Errorf("config: channels.telegramAccounts[%d].token is required when enabled", i)
+		}
+		if err := register(account.AccountIDValue()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func normalizeAccountID(v string) string {
+	value := strings.ToLower(strings.TrimSpace(v))
+	if value == "" {
+		return "default"
+	}
+	return value
 }
