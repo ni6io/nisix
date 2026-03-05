@@ -107,3 +107,31 @@ Use this as the running handoff log between sessions.
 
 ### Next Session First Step
 - Migrate this bridge to structured model function-calling payloads (provider-native) and support typed arguments.
+
+## 2026-03-05 18:03 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Added chat commands for listing capabilities directly in runtime:
+  - `/skills list` and `/skill list`
+  - `/tools list` and `/tool list`
+- Command behavior:
+  - Skills list loads current workspace skills and shows enabled/disabled status with reason when blocked.
+  - Tools list shows registered tools and whether each tool is allowed/blocked by current tool policy.
+  - Both command paths bypass model generation.
+- Added tests:
+  - `TestRuntimeSkillsListCommand`
+  - `TestRuntimeToolsListCommand`
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- Output is plain text for now; if UI needs structured list in chat flow, add a typed event or JSON mode.
+
+### Next Session First Step
+- Add `/skills show <name>` or `/tools show <name>` command to inspect details/schema quickly from chat.

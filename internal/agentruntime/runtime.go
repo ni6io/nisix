@@ -285,6 +285,13 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 }
 
 func (r *Runtime) handleCommand(req domain.RunRequest, text string) (bool, string) {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "/skills list", "/skill list":
+		return true, r.listSkills()
+	case "/tools list", "/tool list":
+		return true, r.listTools()
+	}
+
 	cmd, ok := profile.ParseCommand(text)
 	if !ok {
 		return false, ""
@@ -486,4 +493,66 @@ func (r *Runtime) parseToolCallFromGeneratedText(generated string) (string, map[
 		return name, input, true, nil
 	}
 	return "", nil, false, nil
+}
+
+func (r *Runtime) listSkills() string {
+	if r.skills == nil {
+		return "skills service unavailable"
+	}
+	var (
+		loaded []skills.Skill
+		err    error
+	)
+	if strings.TrimSpace(r.workspaceDir) != "" {
+		loaded, err = r.skills.LoadAll(r.workspaceDir)
+		if err != nil {
+			return "skills list failed: " + err.Error()
+		}
+	} else {
+		loaded = r.skills.LoadedSkills()
+	}
+	if len(loaded) == 0 {
+		return "no skills found"
+	}
+	lines := make([]string, 0, len(loaded)+1)
+	lines = append(lines, "skills:")
+	for _, sk := range loaded {
+		status := "enabled"
+		if !sk.Enabled {
+			status = "disabled"
+			if strings.TrimSpace(sk.Reason) != "" {
+				status += " (" + sk.Reason + ")"
+			}
+		}
+		line := fmt.Sprintf("- %s [%s]", sk.Name, status)
+		if desc := strings.TrimSpace(sk.Description); desc != "" {
+			line += " - " + desc
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) listTools() string {
+	if r.tools == nil {
+		return "no tools registered"
+	}
+	catalog := r.tools.Catalog()
+	if len(catalog) == 0 {
+		return "no tools registered"
+	}
+	lines := make([]string, 0, len(catalog)+1)
+	lines = append(lines, "tools:")
+	for _, tool := range catalog {
+		status := "allowed"
+		if !r.policy.Allowed(tool.Name) {
+			status = "blocked"
+		}
+		line := fmt.Sprintf("- %s [%s]", tool.Name, status)
+		if desc := strings.TrimSpace(tool.Description); desc != "" {
+			line += " - " + desc
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
