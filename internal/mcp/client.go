@@ -29,6 +29,13 @@ const (
 	transportStreamableHTTP transportKind = "streamable_http"
 )
 
+type framingKind int
+
+const (
+	framingLSP framingKind = iota
+	framingNDJSON
+)
+
 type Notification struct {
 	Server string          `json:"server"`
 	Method string          `json:"method"`
@@ -39,6 +46,7 @@ type Client struct {
 	name      string
 	logger    *slog.Logger
 	transport transportKind
+	framing   framingKind
 
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -99,6 +107,8 @@ func StartClient(ctx context.Context, name string, baseDir string, cfg ServerCon
 		return nil, fmt.Errorf("mcp: server %s: %w", name, err)
 	}
 
+	framing := resolveFraming(cfg)
+
 	timeoutSec := cfg.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = 60
@@ -108,6 +118,7 @@ func StartClient(ctx context.Context, name string, baseDir string, cfg ServerCon
 		name:           name,
 		logger:         logger,
 		transport:      kind,
+		framing:        framing,
 		headers:        cloneStringMap(cfg.Headers),
 		pending:        make(map[string]chan rpcResponse),
 		notifications:  make(chan Notification, 128),
@@ -190,7 +201,11 @@ func (c *Client) startStdio(ctx context.Context, baseDir string, cfg ServerConfi
 	c.stdout = stdout
 	c.stderr = stderr
 
-	go c.readLoopStdio()
+	if c.framing == framingNDJSON {
+		go c.readLoopStdioNDJSON()
+	} else {
+		go c.readLoopStdio()
+	}
 	go c.stderrLoop()
 	go c.waitLoop()
 	return nil
@@ -656,21 +671,30 @@ func (c *Client) emitNotification(method string, params json.RawMessage) {
 }
 
 func (c *Client) writeStdioMessage(msg map[string]any) error {
-	body, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	var frame bytes.Buffer
-	_, _ = fmt.Fprintf(&frame, "Content-Length: %d\r\n\r\n", len(body))
-	frame.Write(body)
-
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	if c.stdin == nil {
 		return errors.New("mcp stdin is nil")
 	}
-	_, err = c.stdin.Write(frame.Bytes())
-	return err
+
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	switch c.framing {
+	case framingNDJSON:
+		if _, err := c.stdin.Write(append(body, '\n')); err != nil {
+			return err
+		}
+		return nil
+	default:
+		var frame bytes.Buffer
+		_, _ = fmt.Fprintf(&frame, "Content-Length: %d\r\n\r\n", len(body))
+		frame.Write(body)
+		_, err = c.stdin.Write(frame.Bytes())
+		return err
+	}
 }
 
 func (c *Client) readLoopStdio() {
@@ -683,6 +707,24 @@ func (c *Client) readLoopStdio() {
 		}
 		c.dispatchRPCMessage(body)
 	}
+}
+
+func (c *Client) readLoopStdioNDJSON() {
+	scanner := bufio.NewScanner(c.stdout)
+	buf := make([]byte, 0, 1024*128)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		c.dispatchRPCMessage([]byte(line))
+	}
+	if err := scanner.Err(); err != nil {
+		c.failPending(err)
+		return
+	}
+	c.failPending(io.EOF)
 }
 
 func (c *Client) readLoopSSE(stream io.Reader) {
@@ -868,6 +910,24 @@ func resolveTransport(cfg ServerConfig) (transportKind, error) {
 	default:
 		return "", fmt.Errorf("unsupported transport %q", transport)
 	}
+}
+
+func resolveFraming(cfg ServerConfig) framingKind {
+	f := strings.ToLower(strings.TrimSpace(cfg.Framing))
+	switch f {
+	case "ndjson", "newline", "jsonlines", "jsonl":
+		return framingNDJSON
+	case "lsp", "content_length", "content-length":
+		return framingLSP
+	}
+
+	command := strings.ToLower(strings.TrimSpace(cfg.Command))
+	argsJoined := strings.ToLower(strings.Join(cfg.Args, " "))
+	if strings.Contains(command, "server-filesystem") || strings.Contains(argsJoined, "server-filesystem") || strings.Contains(command, "mcp-server-filesystem") {
+		return framingNDJSON
+	}
+
+	return framingLSP
 }
 
 func resolveDir(baseDir string, configured string) string {

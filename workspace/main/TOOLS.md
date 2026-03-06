@@ -4,7 +4,7 @@
 - `time_now`: returns current server timestamp.
 - MCP tools are loaded at startup from `mcp.json` with name pattern `mcp_<server>_<tool>`.
 - Example (filesystem server): `mcp_filesystem_list_directory`, `mcp_filesystem_read_file`, `mcp_filesystem_write_file`.
-- Enabled now (policy allowlist): `mcp_filesystem_list_directory`.
+- Enabled now (policy allowlist): `mcp_filesystem_*`.
 
 ## Tool Usage Rules
 - Use tools only when they improve correctness or speed.

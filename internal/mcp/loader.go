@@ -30,6 +30,7 @@ type ServerConfig struct {
 	MessageURL string            `json:"messageUrl"`
 	Headers    map[string]string `json:"headers"`
 	TimeoutSec int               `json:"timeoutSec"`
+	Framing    string            `json:"framing"`
 }
 
 type Options struct {

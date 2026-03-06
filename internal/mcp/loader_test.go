@@ -63,6 +63,49 @@ func TestRegisterFromFileRegistersAndExecutesTools_Stdio(t *testing.T) {
 	assertMCPToolWorks(t, reg, "mcp_demo_echo")
 }
 
+func TestRegisterFromFileRegistersAndExecutesTools_StdioNDJSON(t *testing.T) {
+	if os.Getenv(helperEnv) == "1" {
+		runHelperServer()
+		os.Exit(0)
+	}
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mcp-ndjson.json")
+	cfg := FileConfig{
+		MCPServers: map[string]ServerConfig{
+			"demo": {
+				Transport: "stdio",
+				Framing:   "ndjson",
+				Command:   os.Args[0],
+				Args:      []string{"-test.run=TestRegisterFromFileRegistersAndExecutesTools_StdioNDJSON", "--"},
+				Env: map[string]string{
+					helperEnv:                      "1",
+					"NISIX_MCP_TEST_HELPER_NDJSON": "1",
+				},
+			},
+		},
+	}
+	writeMCPConfig(t, configPath, cfg)
+
+	reg := tools.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	manager, count, err := RegisterFromFile(ctx, reg, configPath, Options{ToolPrefix: "mcp"})
+	if err != nil {
+		t.Fatalf("register from file: %v", err)
+	}
+	if manager == nil {
+		t.Fatal("expected manager")
+	}
+	defer func() { _ = manager.Close() }()
+
+	if count != 1 {
+		t.Fatalf("expected one registered tool, got %d", count)
+	}
+	assertMCPToolWorks(t, reg, "mcp_demo_echo")
+}
+
 func TestManagerForwardsNotificationsFromStdio(t *testing.T) {
 	if os.Getenv(helperEnv) == "1" {
 		runHelperServer()
@@ -647,10 +690,17 @@ func mustJSON(v any) string {
 }
 
 func runHelperServer() {
+	useNDJSON := os.Getenv("NISIX_MCP_TEST_HELPER_NDJSON") == "1"
 	reader := bufio.NewReader(os.Stdin)
 	writer := bufio.NewWriter(os.Stdout)
 	for {
-		body, err := readHelperFrame(reader)
+		var body []byte
+		var err error
+		if useNDJSON {
+			body, err = readHelperNDJSON(reader)
+		} else {
+			body, err = readHelperFrame(reader)
+		}
 		if err != nil {
 			return
 		}
@@ -661,10 +711,15 @@ func runHelperServer() {
 		method, _ := msg["method"].(string)
 		id, hasID := msg["id"]
 
+		write := writeHelperResponse
+		if useNDJSON {
+			write = writeHelperResponseNDJSON
+		}
+
 		switch method {
 		case "initialize":
 			if hasID {
-				writeHelperResponse(writer, map[string]any{
+				write(writer, map[string]any{
 					"jsonrpc": "2.0",
 					"id":      id,
 					"result": map[string]any{
@@ -678,7 +733,7 @@ func runHelperServer() {
 			continue
 		case "tools/list":
 			if hasID {
-				writeHelperResponse(writer, map[string]any{
+				write(writer, map[string]any{
 					"jsonrpc": "2.0",
 					"id":      id,
 					"result": map[string]any{
@@ -702,13 +757,13 @@ func runHelperServer() {
 			args, _ := params["arguments"].(map[string]any)
 			message, _ := args["message"].(string)
 			if hasID {
-				writeHelperResponse(writer, map[string]any{
+				write(writer, map[string]any{
 					"jsonrpc": "2.0",
 					"method":  "notifications/progress",
 					"params":  map[string]any{"stage": "call_started"},
 				})
 				if strings.EqualFold(strings.TrimSpace(message), "boom") {
-					writeHelperResponse(writer, map[string]any{
+					write(writer, map[string]any{
 						"jsonrpc": "2.0",
 						"id":      id,
 						"result": map[string]any{
@@ -718,7 +773,7 @@ func runHelperServer() {
 					})
 					continue
 				}
-				writeHelperResponse(writer, map[string]any{
+				write(writer, map[string]any{
 					"jsonrpc": "2.0",
 					"id":      id,
 					"result": map[string]any{
@@ -730,7 +785,7 @@ func runHelperServer() {
 			}
 		default:
 			if hasID {
-				writeHelperResponse(writer, map[string]any{
+				write(writer, map[string]any{
 					"jsonrpc": "2.0",
 					"id":      id,
 					"error": map[string]any{
@@ -749,6 +804,12 @@ func writeHelperResponse(writer *bufio.Writer, payload map[string]any) {
 	_, _ = fmt.Fprintf(&frame, "Content-Length: %d\r\n\r\n", len(body))
 	frame.Write(body)
 	_, _ = writer.Write(frame.Bytes())
+	_ = writer.Flush()
+}
+
+func writeHelperResponseNDJSON(writer *bufio.Writer, payload map[string]any) {
+	body, _ := json.Marshal(payload)
+	_, _ = writer.Write(append(body, '\n'))
 	_ = writer.Flush()
 }
 
@@ -783,4 +844,12 @@ func readHelperFrame(reader *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	return body, nil
+}
+
+func readHelperNDJSON(reader *bufio.Reader) ([]byte, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strings.TrimSpace(line)), nil
 }
