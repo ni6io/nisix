@@ -35,7 +35,10 @@
   ],
   "session": {
     "dmMode": "per-channel-peer",
-    "stateDir": "./state"
+    "stateDir": "./state",
+    "contextHistoryLimit": 24,
+    "contextSummaryMaxChars": 1800,
+    "contextSummaryLineChars": 180
   },
   "workspace": {
     "bootstrapFromTemplates": true,
@@ -137,4 +140,3 @@
     ]
   }
 }
-

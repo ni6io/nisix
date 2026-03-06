@@ -138,6 +138,10 @@ Abort a run:
 
 - Session store: `<session.stateDir>/sessions.json`
 - Transcripts: `<session.stateDir>/transcripts/<sessionId>.jsonl`
+- Rolling model context state is also persisted in `sessions.json`:
+  - `session.contextHistoryLimit`
+  - `session.contextSummaryMaxChars`
+  - `session.contextSummaryLineChars`
 
 ## Telegram adapter
 

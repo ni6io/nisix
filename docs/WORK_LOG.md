@@ -29,6 +29,47 @@ Use this as the running handoff log between sessions.
 
 ---
 
+## 2026-03-06 14:44 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `c3d7c8d`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Reworked transcript summarization into persisted rolling session context:
+  - `internal/sessions.Manager` now maintains recent context window and rolling conversation summary incrementally during transcript appends.
+  - Context state is stored in `state/sessions.json` alongside each session entry, so normal turns no longer need to rescan transcript files to build model context.
+  - Legacy sessions or changed context budgets trigger one-time rebuild from transcript, then continue incrementally.
+- Added configurable context budget settings:
+  - `session.contextHistoryLimit`
+  - `session.contextSummaryMaxChars`
+  - `session.contextSummaryLineChars`
+- Simplified gateway context loading:
+  - `internal/gateway/server.go` now asks `sessions.ModelContext(...)` for history + summary instead of rebuilding it locally.
+- Added regression coverage:
+  - `internal/sessions/manager_test.go` covers rolling summary persistence and legacy transcript rebuild.
+  - `internal/gateway/server_history_test.go` now verifies summary behavior with custom context budget.
+  - `internal/config/config_test.go` covers new session-context defaults.
+- Updated docs/config examples:
+  - `README.md`
+  - `configs/nisix.example.json`
+  - `configs/nisix.local.example.json`
+  - `docs/PROJECT_TRACKER.md`
+
+### Validation
+- `go test ./internal/sessions ./internal/gateway ./internal/config ./cmd/nisixd`: pass
+- `go test ./...`: pass
+- Manual checks:
+  - Not run
+
+### Risks / Follow-up
+- Rolling summary is now persistent and cheap to maintain, but it is still string-based compression rather than semantic/task-aware agent memory.
+- Very old sessions rebuilt from transcript once on first access after deploy; large transcripts may still incur a one-time catch-up cost.
+
+### Next Session First Step
+- If agent continuity still needs improvement, add semantic session-state fields (goal, plan, blockers, key tool results) instead of relying only on compressed chat text.
+
 ## 2026-03-06 14:26 (Asia/Ho_Chi_Minh)
 
 ### Context Loaded

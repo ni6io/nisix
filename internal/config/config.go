@@ -52,8 +52,11 @@ type BindingMatch struct {
 }
 
 type SessionConfig struct {
-	DMMode   string `json:"dmMode"`
-	StateDir string `json:"stateDir"`
+	DMMode                  string `json:"dmMode"`
+	StateDir                string `json:"stateDir"`
+	ContextHistoryLimit     int    `json:"contextHistoryLimit"`
+	ContextSummaryMaxChars  int    `json:"contextSummaryMaxChars"`
+	ContextSummaryLineChars int    `json:"contextSummaryLineChars"`
 }
 
 type ToolsConfig struct {
@@ -221,6 +224,15 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Session.StateDir == "" {
 		cfg.Session.StateDir = "./state"
+	}
+	if cfg.Session.ContextHistoryLimit <= 0 {
+		cfg.Session.ContextHistoryLimit = 24
+	}
+	if cfg.Session.ContextSummaryMaxChars <= 0 {
+		cfg.Session.ContextSummaryMaxChars = 1800
+	}
+	if cfg.Session.ContextSummaryLineChars <= 0 {
+		cfg.Session.ContextSummaryLineChars = 180
 	}
 	if cfg.MCP.ConfigFile == "" {
 		cfg.MCP.ConfigFile = "./mcp.json"

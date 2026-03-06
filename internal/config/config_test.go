@@ -25,6 +25,15 @@ func TestLoadAppliesModelAndTelegramDefaults(t *testing.T) {
 	if cfg.Model.Provider != "echo" {
 		t.Fatalf("expected model.provider echo, got %q", cfg.Model.Provider)
 	}
+	if cfg.Session.ContextHistoryLimit != 24 {
+		t.Fatalf("expected session contextHistoryLimit 24, got %d", cfg.Session.ContextHistoryLimit)
+	}
+	if cfg.Session.ContextSummaryMaxChars != 1800 {
+		t.Fatalf("expected session contextSummaryMaxChars 1800, got %d", cfg.Session.ContextSummaryMaxChars)
+	}
+	if cfg.Session.ContextSummaryLineChars != 180 {
+		t.Fatalf("expected session contextSummaryLineChars 180, got %d", cfg.Session.ContextSummaryLineChars)
+	}
 	if cfg.Model.OpenAI.Model != "gpt-5-codex" {
 		t.Fatalf("expected default model, got %q", cfg.Model.OpenAI.Model)
 	}

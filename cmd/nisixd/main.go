@@ -86,6 +86,11 @@ func main() {
 		log.Fatalf("create session store: %v", err)
 	}
 	sessionManager := sessions.NewManager(fileStore, transcriptDir)
+	sessionManager.SetContextBudget(sessions.ContextBudget{
+		HistoryLimit:        cfg.Session.ContextHistoryLimit,
+		SummaryMaxChars:     cfg.Session.ContextSummaryMaxChars,
+		SummaryLineMaxChars: cfg.Session.ContextSummaryLineChars,
+	})
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())

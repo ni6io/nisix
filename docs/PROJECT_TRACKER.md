@@ -13,7 +13,7 @@ Goal: OpenClaw-aligned assistant runtime in Go with Telegram + WS control plane.
 
 - Gateway with HTTP + WebSocket (`connect`, `chat.send`, `chat.abort`, `chat.history`, `sessions.list`).
 - Telegram adapter with polling, mention policy, allowlist, dedupe, and throttling.
-- Persistent sessions + transcripts (`state/sessions.json`, JSONL transcript files) with recent conversation history reinjected and older transcript turns summarized into model requests.
+- Persistent sessions + transcripts (`state/sessions.json`, JSONL transcript files) with recent conversation history reinjected, rolling session summaries persisted in `sessions.json`, and configurable context budgets for model requests.
 - Skills V1:
   - workspace discovery from `workspace/skills/*/SKILL.md`
   - explicit invocation + auto-match

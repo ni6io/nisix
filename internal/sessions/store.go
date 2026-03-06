@@ -10,10 +10,20 @@ import (
 )
 
 type Entry struct {
-	SessionKey string    `json:"sessionKey"`
-	SessionID  string    `json:"sessionId"`
-	AgentID    string    `json:"agentId"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	SessionKey          string           `json:"sessionKey"`
+	SessionID           string           `json:"sessionId"`
+	AgentID             string           `json:"agentId"`
+	UpdatedAt           time.Time        `json:"updatedAt"`
+	ContextStateVersion int              `json:"contextStateVersion,omitempty"`
+	ContextStateSig     string           `json:"contextStateSig,omitempty"`
+	SummarizedMessages  int              `json:"summarizedMessages,omitempty"`
+	ConversationSummary string           `json:"conversationSummary,omitempty"`
+	RecentMessages      []ContextMessage `json:"recentMessages,omitempty"`
+}
+
+type ContextMessage struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 type Store interface {

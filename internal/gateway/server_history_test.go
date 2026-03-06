@@ -130,11 +130,12 @@ func TestHandleInboundSummarizesOlderTranscriptMessages(t *testing.T) {
 
 	store := sessions.NewInMemoryStore()
 	manager := sessions.NewManager(store, t.TempDir())
+	manager.SetContextBudget(sessions.ContextBudget{HistoryLimit: 4, SummaryMaxChars: 512, SummaryLineMaxChars: 120})
 	entry, err := manager.Touch("agent:main:telegram:default:dm:123", "main")
 	if err != nil {
 		t.Fatalf("touch session: %v", err)
 	}
-	for i := 0; i < modelHistoryWindow+6; i++ {
+	for i := 0; i < 10; i++ {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
@@ -177,8 +178,8 @@ func TestHandleInboundSummarizesOlderTranscriptMessages(t *testing.T) {
 		t.Fatalf("expected 1 runtime request, got %d", len(rt.requests))
 	}
 	req := rt.requests[0]
-	if len(req.History) != modelHistoryWindow {
-		t.Fatalf("expected %d recent history messages, got %d", modelHistoryWindow, len(req.History))
+	if len(req.History) != 4 {
+		t.Fatalf("expected 4 recent history messages, got %d", len(req.History))
 	}
 	if req.History[0].Text != "message 1970-01-01T00:00:07Z" {
 		t.Fatalf("expected history to keep newest window, got first=%q", req.History[0].Text)

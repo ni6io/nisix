@@ -56,6 +56,95 @@ func TestHistoryPageFilteredCursorPagination(t *testing.T) {
 	}
 }
 
+func TestModelContextMaintainsRollingSummaryState(t *testing.T) {
+	transcriptDir := t.TempDir()
+	store := NewInMemoryStore()
+	mgr := NewManager(store, transcriptDir)
+	mgr.SetContextBudget(ContextBudget{HistoryLimit: 3, SummaryMaxChars: 256, SummaryLineMaxChars: 80})
+
+	entry, err := mgr.Touch("agent:main:ctx", "main")
+	if err != nil {
+		t.Fatalf("touch session: %v", err)
+	}
+	for i, text := range []string{"u1", "a1", "u2", "a2", "u3"} {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		if err := mgr.AppendWithOptions(entry, role, text, AppendOptions{EventType: "message"}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	history, summary, err := mgr.ModelContext(entry.SessionKey)
+	if err != nil {
+		t.Fatalf("model context: %v", err)
+	}
+	if len(history) != 3 || history[0].Text != "u2" || history[2].Text != "u3" {
+		t.Fatalf("unexpected rolling history: %#v", history)
+	}
+	if !strings.Contains(summary, "Earlier conversation covered 2 messages") {
+		t.Fatalf("unexpected summary header: %q", summary)
+	}
+	if !strings.Contains(summary, "User: u1") || !strings.Contains(summary, "Assistant: a1") {
+		t.Fatalf("expected summarized early messages, got %q", summary)
+	}
+
+	stored, ok := store.Get(entry.SessionKey)
+	if !ok {
+		t.Fatal("expected stored entry")
+	}
+	if stored.ContextStateVersion != contextStateVersion || stored.ContextStateSig == "" {
+		t.Fatalf("missing persisted context state metadata: %#v", stored)
+	}
+	if len(stored.RecentMessages) != 3 || stored.SummarizedMessages != 2 {
+		t.Fatalf("unexpected stored context state: %#v", stored)
+	}
+}
+
+func TestModelContextRebuildsLegacyStateFromTranscript(t *testing.T) {
+	transcriptDir := t.TempDir()
+	store := NewInMemoryStore()
+	mgr := NewManager(store, transcriptDir)
+	mgr.SetContextBudget(ContextBudget{HistoryLimit: 2, SummaryMaxChars: 256, SummaryLineMaxChars: 80})
+
+	entry := Entry{
+		SessionKey: "agent:main:legacy",
+		SessionID:  "sess-legacy",
+		AgentID:    "main",
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := store.Put(entry); err != nil {
+		t.Fatalf("put entry: %v", err)
+	}
+
+	writeTranscript(t, transcriptDir, entry.SessionID, []MessageRecord{
+		{Role: "user", Text: "hello", EventType: "message", At: time.Now().UTC()},
+		{Role: "assistant", Text: "hi", EventType: "message", At: time.Now().UTC()},
+		{Role: "assistant", Text: "chunk", EventType: "message_chunk", Type: "event", At: time.Now().UTC()},
+		{Role: "user", Text: "need help", EventType: "message", At: time.Now().UTC()},
+	})
+
+	history, summary, err := mgr.ModelContext(entry.SessionKey)
+	if err != nil {
+		t.Fatalf("model context: %v", err)
+	}
+	if len(history) != 2 || history[0].Text != "hi" || history[1].Text != "need help" {
+		t.Fatalf("unexpected rebuilt history: %#v", history)
+	}
+	if !strings.Contains(summary, "Earlier conversation covered 1 messages") || !strings.Contains(summary, "User: hello") {
+		t.Fatalf("unexpected rebuilt summary: %q", summary)
+	}
+
+	stored, ok := store.Get(entry.SessionKey)
+	if !ok {
+		t.Fatal("expected stored entry after rebuild")
+	}
+	if stored.ContextStateVersion != contextStateVersion {
+		t.Fatalf("expected rebuilt context state version, got %#v", stored)
+	}
+}
+
 func TestHistoryPageFilteredBeforeAfter(t *testing.T) {
 	transcriptDir := t.TempDir()
 	store := NewInMemoryStore()
