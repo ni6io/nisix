@@ -41,11 +41,16 @@ func TestOpenAIClientGenerateUsesResponsesAPI(t *testing.T) {
 	}
 
 	out, err := client.Generate(context.Background(), Request{
-		UserText:    "Implement this feature",
-		Identity:    domain.AgentIdentity{Name: "Nisix"},
-		SoulText:    "Be concise and rigorous.",
-		SkillPrompt: "## Skill: architecture\nUse phased rollout.",
-		MemoryHits:  []string{"/tmp/memory/foo.md"},
+		UserText:            "Implement this feature",
+		Identity:            domain.AgentIdentity{Name: "Nisix"},
+		SoulText:            "Be concise and rigorous.",
+		SkillPrompt:         "## Skill: architecture\nUse phased rollout.",
+		ConversationSummary: "Earlier the user explained the feature goals.",
+		MemoryHits:          []string{"/tmp/memory/foo.md"},
+		History: []domain.ConversationMessage{
+			{Role: "user", Text: "Remember my name is Thanh."},
+			{Role: "assistant", Text: "Understood."},
+		},
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -58,11 +63,25 @@ func TestOpenAIClientGenerateUsesResponsesAPI(t *testing.T) {
 		t.Fatalf("unexpected model: %#v", captured["model"])
 	}
 	input := captured["input"].([]any)
+	if len(input) != 4 {
+		t.Fatalf("expected system + history + user input, got %#v", input)
+	}
 	systemMsg := input[0].(map[string]any)
 	content := systemMsg["content"].([]any)[0].(map[string]any)
 	systemText := content["text"].(string)
 	if !strings.Contains(systemText, "SOUL instructions:") || !strings.Contains(systemText, "Active skills:") {
 		t.Fatalf("system prompt missing expected sections: %q", systemText)
+	}
+	if !strings.Contains(systemText, "Conversation summary:") {
+		t.Fatalf("expected conversation summary in system prompt: %q", systemText)
+	}
+	historyUser := input[1].(map[string]any)
+	if historyUser["role"] != "user" {
+		t.Fatalf("expected history user role, got %#v", historyUser)
+	}
+	historyText := historyUser["content"].([]any)[0].(map[string]any)["text"].(string)
+	if historyText != "Remember my name is Thanh." {
+		t.Fatalf("unexpected history text: %q", historyText)
 	}
 }
 

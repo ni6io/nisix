@@ -27,6 +27,9 @@ func (c *EchoClient) Generate(_ context.Context, req Request) (string, error) {
 	if strings.TrimSpace(req.SkillPrompt) != "" {
 		reply += "\n\n" + req.SkillPrompt
 	}
+	if strings.TrimSpace(req.ConversationSummary) != "" {
+		reply += "\n\nConversation summary:\n" + strings.TrimSpace(req.ConversationSummary)
+	}
 	if strings.TrimSpace(req.ProjectContext) != "" {
 		reply += "\n\n" + req.ProjectContext
 	}

@@ -14,10 +14,11 @@ func TestBuildSystemPromptOrder(t *testing.T) {
 			Avatar: "N",
 			Emoji:  "compass",
 		},
-		SoulText:       "Be concise.",
-		ProjectContext: "# Project Context\n\n## AGENTS.md\nagents\n\n## TOOLS.md\ntools\n\n## USER.md\nuser",
-		SkillPrompt:    "## Skill: architecture\nUse phased rollout.",
-		MemoryHits:     []string{"/tmp/memory/a.md"},
+		SoulText:            "Be concise.",
+		ProjectContext:      "# Project Context\n\n## AGENTS.md\nagents\n\n## TOOLS.md\ntools\n\n## USER.md\nuser",
+		SkillPrompt:         "## Skill: architecture\nUse phased rollout.",
+		ConversationSummary: "Earlier the user introduced themself.",
+		MemoryHits:          []string{"/tmp/memory/a.md"},
 	}
 
 	prompt := BuildSystemPrompt(req)
@@ -37,5 +38,32 @@ func TestBuildSystemPromptOrder(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Active skills:") || !strings.Contains(prompt, "Relevant memory files:") {
 		t.Fatalf("missing skill/memory sections: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Conversation summary:") {
+		t.Fatalf("missing conversation summary section: %q", prompt)
+	}
+}
+
+func TestBuildUserPromptIncludesConversationHistory(t *testing.T) {
+	req := Request{
+		UserText: "What is my name?",
+		History: []domain.ConversationMessage{
+			{Role: "user", Text: "My name is Thanh"},
+			{Role: "assistant", Text: "Noted."},
+		},
+	}
+
+	prompt := BuildUserPrompt(req)
+	if !strings.Contains(prompt, "Conversation history:") {
+		t.Fatalf("expected conversation history heading, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "User: My name is Thanh") {
+		t.Fatalf("expected user history entry, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Assistant: Noted.") {
+		t.Fatalf("expected assistant history entry, got %q", prompt)
+	}
+	if !strings.HasSuffix(prompt, "What is my name?") {
+		t.Fatalf("expected current user message at end, got %q", prompt)
 	}
 }

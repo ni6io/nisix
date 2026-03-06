@@ -17,12 +17,14 @@ import (
 )
 
 type fakeModel struct {
-	reply string
-	calls int
+	reply   string
+	calls   int
+	lastReq model.Request
 }
 
-func (m *fakeModel) Generate(_ context.Context, _ model.Request) (string, error) {
+func (m *fakeModel) Generate(_ context.Context, req model.Request) (string, error) {
 	m.calls++
+	m.lastReq = req
 	return m.reply, nil
 }
 
@@ -65,8 +67,96 @@ func TestRuntimeUsesModelClientForNormalMessages(t *testing.T) {
 	if fm.calls != 1 {
 		t.Fatalf("expected one model call, got %d", fm.calls)
 	}
+	if fm.lastReq.UserText != "hello" {
+		t.Fatalf("expected user text to reach model, got %q", fm.lastReq.UserText)
+	}
 	if final != "codex says hi" {
 		t.Fatalf("unexpected final output: %q", final)
+	}
+}
+
+func TestRuntimePassesConversationHistoryToModel(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "ok"}
+
+	r := New(
+		tools.NewRegistry(),
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	events := r.Run(context.Background(), domain.RunRequest{
+		AgentID:    "main",
+		SessionKey: "agent:main:test",
+		History: []domain.ConversationMessage{
+			{Role: "user", Text: "My name is Thanh"},
+			{Role: "assistant", Text: "Noted."},
+		},
+		Message: domain.InboundMessage{
+			Text: "What is my name?",
+			At:   time.Now(),
+		},
+	})
+
+	for range events {
+	}
+	if fm.calls != 1 {
+		t.Fatalf("expected one model call, got %d", fm.calls)
+	}
+	if len(fm.lastReq.History) != 2 {
+		t.Fatalf("expected 2 history messages, got %#v", fm.lastReq.History)
+	}
+	if fm.lastReq.History[0].Text != "My name is Thanh" || fm.lastReq.History[1].Role != "assistant" {
+		t.Fatalf("unexpected history passed to model: %#v", fm.lastReq.History)
+	}
+}
+
+func TestRuntimePassesConversationSummaryToModel(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "ok"}
+
+	r := New(
+		tools.NewRegistry(),
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	events := r.Run(context.Background(), domain.RunRequest{
+		AgentID:             "main",
+		SessionKey:          "agent:main:test",
+		ConversationSummary: "Earlier the user said their name is Thanh.",
+		Message: domain.InboundMessage{
+			Text: "What is my name?",
+			At:   time.Now(),
+		},
+	})
+
+	for range events {
+	}
+	if fm.lastReq.ConversationSummary != "Earlier the user said their name is Thanh." {
+		t.Fatalf("unexpected conversation summary: %q", fm.lastReq.ConversationSummary)
 	}
 }
 

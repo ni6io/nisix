@@ -41,10 +41,17 @@ type Route struct {
 }
 
 type RunRequest struct {
-	AgentID    string
-	SessionKey string
-	RunID      string
-	Message    InboundMessage
+	AgentID             string
+	SessionKey          string
+	RunID               string
+	Message             InboundMessage
+	History             []ConversationMessage
+	ConversationSummary string
+}
+
+type ConversationMessage struct {
+	Role string
+	Text string
 }
 
 type AgentEvent struct {

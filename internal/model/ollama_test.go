@@ -37,11 +37,16 @@ func TestOllamaClientGenerateUsesGenerateAPI(t *testing.T) {
 	}
 
 	out, err := client.Generate(context.Background(), Request{
-		UserText:    "Implement this feature",
-		Identity:    domain.AgentIdentity{Name: "Nisix"},
-		SoulText:    "Be concise and rigorous.",
-		SkillPrompt: "## Skill: architecture\nUse phased rollout.",
-		MemoryHits:  []string{"/tmp/memory/foo.md"},
+		UserText:            "Implement this feature",
+		Identity:            domain.AgentIdentity{Name: "Nisix"},
+		SoulText:            "Be concise and rigorous.",
+		SkillPrompt:         "## Skill: architecture\nUse phased rollout.",
+		ConversationSummary: "Earlier the user explained the feature goals.",
+		MemoryHits:          []string{"/tmp/memory/foo.md"},
+		History: []domain.ConversationMessage{
+			{Role: "user", Text: "My name is Thanh"},
+			{Role: "assistant", Text: "Noted."},
+		},
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -60,8 +65,15 @@ func TestOllamaClientGenerateUsesGenerateAPI(t *testing.T) {
 	if !strings.Contains(systemText, "SOUL instructions:") || !strings.Contains(systemText, "Active skills:") {
 		t.Fatalf("system prompt missing expected sections: %q", systemText)
 	}
-	if captured["prompt"] != "Implement this feature" {
-		t.Fatalf("unexpected prompt: %#v", captured["prompt"])
+	if !strings.Contains(systemText, "Conversation summary:") {
+		t.Fatalf("expected conversation summary in system prompt, got %q", systemText)
+	}
+	prompt, _ := captured["prompt"].(string)
+	if !strings.Contains(prompt, "Conversation history:") || !strings.Contains(prompt, "User: My name is Thanh") {
+		t.Fatalf("expected history in prompt, got %q", prompt)
+	}
+	if !strings.HasSuffix(prompt, "Implement this feature") {
+		t.Fatalf("expected current user text at end of prompt, got %q", prompt)
 	}
 }
 

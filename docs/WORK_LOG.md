@@ -29,6 +29,42 @@ Use this as the running handoff log between sessions.
 
 ---
 
+## 2026-03-06 14:26 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `d924810`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Fixed chat context loss by threading recent conversation history back into model requests:
+  - `gateway` now reads transcript messages before appending the current user turn.
+  - `runtime` forwards filtered `user`/`assistant` history to the model layer.
+  - `openai/codex` requests now send prior turns as separate chat messages.
+  - `ollama` requests now include a structured conversation-history block in the prompt.
+- Added transcript summarization for long sessions:
+  - `gateway` keeps the latest 24 transcript messages as raw history.
+  - Older transcript messages are compressed into a deterministic `Conversation summary` block and injected into the model system prompt.
+  - Summary generation skips chunk/tool events and bounds excerpt count/length to control prompt growth.
+- Added regression coverage:
+  - `internal/gateway/server_history_test.go` ensures transcript history reaches runtime, excludes chunks/tool events, and summarizes older turns.
+  - `internal/agentruntime/runtime_model_test.go` ensures runtime forwards both history and conversation summary.
+  - `internal/model/*_test.go` ensures provider payloads include both history and summary context.
+- Updated tracker note to reflect history reinjection plus transcript summarization in model calls.
+
+### Validation
+- `go test ./internal/model ./internal/agentruntime ./internal/gateway`: pass
+- `go test ./...`: pass
+- Manual checks:
+  - Not run
+
+### Risks / Follow-up
+- History window and summary bounds are still fixed constants; if operators need tuning per deployment, move them into config.
+- Ollama still uses `/api/generate`; history is serialized into the prompt rather than using provider-native chat messages.
+
+### Next Session First Step
+- If context quality is still weak in long chats, add configurable history/summary limits or persist rolling summaries instead of rebuilding them from transcript each turn.
+
 ## 2026-03-05 16:45 (Asia/Ho_Chi_Minh)
 
 ### Context Loaded

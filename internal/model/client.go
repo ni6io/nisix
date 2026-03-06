@@ -9,14 +9,16 @@ import (
 )
 
 type Request struct {
-	AgentID        string
-	SessionKey     string
-	UserText       string
-	Identity       domain.AgentIdentity
-	SoulText       string
-	ProjectContext string
-	SkillPrompt    string
-	MemoryHits     []string
+	AgentID             string
+	SessionKey          string
+	UserText            string
+	History             []domain.ConversationMessage
+	ConversationSummary string
+	Identity            domain.AgentIdentity
+	SoulText            string
+	ProjectContext      string
+	SkillPrompt         string
+	MemoryHits          []string
 }
 
 type Client interface {
@@ -53,6 +55,10 @@ func BuildSystemPrompt(req Request) string {
 		lines = append(lines, "Active skills:")
 		lines = append(lines, v)
 	}
+	if v := strings.TrimSpace(req.ConversationSummary); v != "" {
+		lines = append(lines, "Conversation summary:")
+		lines = append(lines, v)
+	}
 	if len(req.MemoryHits) > 0 {
 		lines = append(lines, "Relevant memory files:")
 		for _, hit := range req.MemoryHits {
@@ -60,4 +66,34 @@ func BuildSystemPrompt(req Request) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func BuildUserPrompt(req Request) string {
+	userText := strings.TrimSpace(req.UserText)
+	if len(req.History) == 0 {
+		return userText
+	}
+
+	lines := make([]string, 0, len(req.History)+3)
+	lines = append(lines, "Conversation history:")
+	for _, msg := range req.History {
+		role := normalizeConversationRole(msg.Role)
+		text := strings.TrimSpace(msg.Text)
+		if text == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", role, text))
+	}
+	lines = append(lines, "Current user message:")
+	lines = append(lines, userText)
+	return strings.Join(lines, "\n")
+}
+
+func normalizeConversationRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "assistant":
+		return "Assistant"
+	default:
+		return "User"
+	}
 }

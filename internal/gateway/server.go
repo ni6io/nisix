@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -55,6 +56,14 @@ type Server struct {
 	workspace    string
 	log          *slog.Logger
 }
+
+const (
+	modelHistoryFetchLimit = 1000000
+	modelHistoryWindow     = 24
+	modelSummaryMaxItems   = 12
+	modelSummaryMaxChars   = 1800
+	modelSummaryLineMaxLen = 180
+)
 
 func New(
 	router Router,
@@ -209,12 +218,18 @@ func (s *Server) handleInbound(
 	s.log.Info("route.resolved", "agentID", route.AgentID, "sessionKey", route.SessionKey, "matchedBy", route.MatchedBy)
 
 	var sessionEntry sessions.Entry
+	history := []domain.ConversationMessage{}
+	conversationSummary := ""
 	if s.sessions != nil {
 		e, err := s.sessions.Touch(route.SessionKey, route.AgentID)
 		if err != nil {
 			return err
 		}
 		sessionEntry = e
+		history, conversationSummary, err = s.modelHistory(route.SessionKey)
+		if err != nil {
+			return err
+		}
 		if err := s.sessions.AppendWithOptions(e, "user", msg.Text, sessions.AppendOptions{
 			EventType: "message",
 			RunID:     strings.TrimSpace(msg.RunID),
@@ -234,10 +249,12 @@ func (s *Server) handleInbound(
 	}
 
 	events := s.run.Run(ctx, domain.RunRequest{
-		AgentID:    route.AgentID,
-		SessionKey: route.SessionKey,
-		RunID:      msg.RunID,
-		Message:    msg,
+		AgentID:             route.AgentID,
+		SessionKey:          route.SessionKey,
+		RunID:               msg.RunID,
+		Message:             msg,
+		History:             history,
+		ConversationSummary: conversationSummary,
 	})
 	for evt := range events {
 		if observer != nil {
@@ -274,6 +291,114 @@ func (s *Server) handleInbound(
 		}
 	}
 	return nil
+}
+
+func (s *Server) modelHistory(sessionKey string) ([]domain.ConversationMessage, string, error) {
+	page, err := s.sessions.HistoryPageFiltered(sessionKey, sessions.HistoryFilter{Limit: modelHistoryFetchLimit})
+	if err != nil {
+		return nil, "", err
+	}
+
+	allMessages := make([]domain.ConversationMessage, 0, modelHistoryWindow*2)
+	for _, rec := range page.Messages {
+		if rec.EventType != "" && rec.EventType != "message" {
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(rec.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		text := strings.TrimSpace(rec.Text)
+		if text == "" {
+			continue
+		}
+		allMessages = append(allMessages, domain.ConversationMessage{
+			Role: role,
+			Text: text,
+		})
+	}
+	if len(allMessages) <= modelHistoryWindow {
+		return allMessages, "", nil
+	}
+
+	splitAt := len(allMessages) - modelHistoryWindow
+	summary := summarizeConversation(allMessages[:splitAt])
+	return allMessages[splitAt:], summary, nil
+}
+
+func summarizeConversation(messages []domain.ConversationMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+
+	selected := sampleConversationMessages(messages, modelSummaryMaxItems)
+	lines := make([]string, 0, len(selected)+2)
+	lines = append(lines, fmt.Sprintf("Earlier conversation covered %d messages. Key excerpts:", len(messages)))
+	for _, msg := range selected {
+		text := compactConversationText(msg.Text, modelSummaryLineMaxLen)
+		if text == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", summarizeRole(msg.Role), text))
+	}
+	if len(selected) < len(messages) {
+		lines = append(lines, fmt.Sprintf("- %d additional earlier messages omitted from this summary.", len(messages)-len(selected)))
+	}
+	return truncateSummary(strings.Join(lines, "\n"), modelSummaryMaxChars)
+}
+
+func sampleConversationMessages(messages []domain.ConversationMessage, maxItems int) []domain.ConversationMessage {
+	if len(messages) == 0 || maxItems <= 0 {
+		return nil
+	}
+	if len(messages) <= maxItems {
+		return messages
+	}
+
+	out := make([]domain.ConversationMessage, 0, maxItems)
+	lastIdx := -1
+	for i := 0; i < maxItems; i++ {
+		idx := i * len(messages) / maxItems
+		if idx <= lastIdx {
+			idx = lastIdx + 1
+		}
+		if idx >= len(messages) {
+			idx = len(messages) - 1
+		}
+		out = append(out, messages[idx])
+		lastIdx = idx
+	}
+	return out
+}
+
+func compactConversationText(text string, maxLen int) string {
+	compacted := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if maxLen <= 0 || len(compacted) <= maxLen {
+		return compacted
+	}
+	if maxLen <= 3 {
+		return compacted[:maxLen]
+	}
+	return compacted[:maxLen-3] + "..."
+}
+
+func summarizeRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "assistant":
+		return "Assistant"
+	default:
+		return "User"
+	}
+}
+
+func truncateSummary(summary string, maxChars int) string {
+	if maxChars <= 0 || len(summary) <= maxChars {
+		return summary
+	}
+	if maxChars <= 3 {
+		return summary[:maxChars]
+	}
+	return summary[:maxChars-3] + "..."
 }
 
 func mapAgentEventType(kind string) string {

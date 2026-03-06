@@ -272,14 +272,16 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 
 		if r.model != nil {
 			generated, err := r.model.Generate(ctx, model.Request{
-				AgentID:        req.AgentID,
-				SessionKey:     req.SessionKey,
-				UserText:       text,
-				Identity:       identity,
-				SoulText:       soulText,
-				ProjectContext: projectContext,
-				SkillPrompt:    skillContext,
-				MemoryHits:     memHits,
+				AgentID:             req.AgentID,
+				SessionKey:          req.SessionKey,
+				UserText:            text,
+				History:             req.History,
+				ConversationSummary: req.ConversationSummary,
+				Identity:            identity,
+				SoulText:            soulText,
+				ProjectContext:      projectContext,
+				SkillPrompt:         skillContext,
+				MemoryHits:          memHits,
 			})
 			if err != nil {
 				out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: "model error: " + err.Error(), Provider: "model", Done: true}

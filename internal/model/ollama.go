@@ -51,8 +51,7 @@ func NewOllamaClient(cfg OllamaConfig) (*OllamaClient, error) {
 }
 
 func (c *OllamaClient) Generate(ctx context.Context, req Request) (string, error) {
-	userText := strings.TrimSpace(req.UserText)
-	if userText == "" {
+	if strings.TrimSpace(req.UserText) == "" {
 		return "", fmt.Errorf("ollama: user text is empty")
 	}
 
@@ -65,7 +64,7 @@ func (c *OllamaClient) Generate(ctx context.Context, req Request) (string, error
 
 	payloadBody := map[string]any{
 		"model":  c.model,
-		"prompt": userText,
+		"prompt": BuildUserPrompt(req),
 		"system": BuildSystemPrompt(req),
 		"stream": false,
 	}
