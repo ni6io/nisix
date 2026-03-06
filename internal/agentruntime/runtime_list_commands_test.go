@@ -11,11 +11,25 @@ import (
 	"time"
 
 	"github.com/ni6io/nisix/internal/domain"
+	"github.com/ni6io/nisix/internal/mcp"
 	"github.com/ni6io/nisix/internal/memory"
 	"github.com/ni6io/nisix/internal/skills"
 	"github.com/ni6io/nisix/internal/toolpolicy"
 	"github.com/ni6io/nisix/internal/tools"
 )
+
+type fakeMCPInspector struct {
+	status mcp.StatusSnapshot
+	tools  []mcp.ToolMapping
+}
+
+func (f fakeMCPInspector) Status() mcp.StatusSnapshot {
+	return f.status
+}
+
+func (f fakeMCPInspector) Tools() []mcp.ToolMapping {
+	return f.tools
+}
 
 func TestRuntimeSkillsListCommand(t *testing.T) {
 	workspace := t.TempDir()
@@ -64,6 +78,7 @@ func TestRuntimeToolsListCommand(t *testing.T) {
 	workspace := t.TempDir()
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewBrowserTool())
 	fm := &fakeModel{reply: "should not be called"}
 
 	r := New(
@@ -84,8 +99,90 @@ func TestRuntimeToolsListCommand(t *testing.T) {
 	)
 
 	final := runFinalForText(t, r, "/tools list")
-	if !strings.Contains(final, "tools:") || !strings.Contains(final, "time_now [blocked]") {
+	if !strings.Contains(final, "tools:") ||
+		!strings.Contains(final, "time_now [blocked]") ||
+		!strings.Contains(final, "browser_open [allowed]") {
 		t.Fatalf("unexpected tools list output: %q", final)
+	}
+	if fm.calls != 0 {
+		t.Fatalf("expected command to bypass model, got calls=%d", fm.calls)
+	}
+}
+
+func TestRuntimeMCPStatusCommand(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "should not be called"}
+
+	r := New(
+		tools.NewRegistry(),
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	r.SetMCPInspector(fakeMCPInspector{
+		status: mcp.StatusSnapshot{
+			Available:       true,
+			ConfigFile:      "/tmp/mcp.json",
+			ToolPrefix:      "mcp",
+			RegisteredTools: 2,
+			Servers: []mcp.ServerStatus{
+				{Name: "demo", Transport: "stdio", ToolCount: 2},
+			},
+		},
+	})
+
+	final := runFinalForText(t, r, "/mcp status")
+	if !strings.Contains(final, "mcp: available=true prefix=mcp tools=2 servers=1") ||
+		!strings.Contains(final, "config: /tmp/mcp.json") ||
+		!strings.Contains(final, "- demo [stdio] tools=2") {
+		t.Fatalf("unexpected mcp status output: %q", final)
+	}
+	if fm.calls != 0 {
+		t.Fatalf("expected command to bypass model, got calls=%d", fm.calls)
+	}
+}
+
+func TestRuntimeMCPToolsCommand(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "should not be called"}
+
+	r := New(
+		tools.NewRegistry(),
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	r.SetMCPInspector(fakeMCPInspector{
+		tools: []mcp.ToolMapping{
+			{LocalName: "mcp_demo_echo", ServerName: "demo", RemoteName: "echo", Description: "Echo test tool"},
+		},
+	})
+
+	final := runFinalForText(t, r, "/mcp tools")
+	if !strings.Contains(final, "mcp tools:") ||
+		!strings.Contains(final, "mcp_demo_echo -> demo.echo") ||
+		!strings.Contains(final, "Echo test tool") {
+		t.Fatalf("unexpected mcp tools output: %q", final)
 	}
 	if fm.calls != 0 {
 		t.Fatalf("expected command to bypass model, got calls=%d", fm.calls)

@@ -155,6 +155,8 @@ func (s *Server) WSHandler() http.Handler {
 							"sessions.list",
 							"skills.list",
 							"tools.catalog",
+							"mcp.status",
+							"mcp.tools",
 							"profile.get",
 							"profile.update",
 							"bootstrap.status",
@@ -210,6 +212,20 @@ func (s *Server) WSHandler() http.Handler {
 				var p protocol.ToolsCatalogParams
 				_ = decodeParams(req.Params, &p)
 				if err := sendRes(req.ID, true, map[string]any{"tools": s.ToolsCatalog()}, nil); err != nil {
+					return
+				}
+
+			case "mcp.status":
+				var p protocol.MCPStatusParams
+				_ = decodeParams(req.Params, &p)
+				if err := sendRes(req.ID, true, map[string]any{"status": s.MCPStatus()}, nil); err != nil {
+					return
+				}
+
+			case "mcp.tools":
+				var p protocol.MCPToolsParams
+				_ = decodeParams(req.Params, &p)
+				if err := sendRes(req.ID, true, map[string]any{"tools": s.MCPTools()}, nil); err != nil {
 					return
 				}
 

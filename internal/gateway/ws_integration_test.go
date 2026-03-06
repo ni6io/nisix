@@ -19,6 +19,7 @@ import (
 	"github.com/ni6io/nisix/internal/bootstrap"
 	"github.com/ni6io/nisix/internal/config"
 	"github.com/ni6io/nisix/internal/domain"
+	"github.com/ni6io/nisix/internal/mcp"
 	"github.com/ni6io/nisix/internal/memory"
 	"github.com/ni6io/nisix/internal/model"
 	"github.com/ni6io/nisix/internal/profile"
@@ -35,6 +36,19 @@ type noopHub struct{}
 
 func (h *noopHub) Send(_ context.Context, _ domain.OutboundMessage) error {
 	return nil
+}
+
+type fakeMCPInspector struct {
+	status mcp.StatusSnapshot
+	tools  []mcp.ToolMapping
+}
+
+func (f fakeMCPInspector) Status() mcp.StatusSnapshot {
+	return f.status
+}
+
+func (f fakeMCPInspector) Tools() []mcp.ToolMapping {
+	return f.tools
 }
 
 func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
@@ -56,6 +70,7 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewBrowserTool())
 
 	rt := agentruntime.New(
 		reg,
@@ -102,6 +117,20 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 		workspace,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
+	server.SetMCPInspector(fakeMCPInspector{
+		status: mcp.StatusSnapshot{
+			Available:       true,
+			ConfigFile:      filepath.Join(workspace, "mcp.json"),
+			ToolPrefix:      "mcp",
+			RegisteredTools: 1,
+			Servers: []mcp.ServerStatus{
+				{Name: "demo", Transport: "stdio", ToolCount: 1},
+			},
+		},
+		tools: []mcp.ToolMapping{
+			{LocalName: "mcp_demo_echo", ServerName: "demo", RemoteName: "echo", Description: "Echo test tool"},
+		},
+	})
 
 	mux := httptest.NewServer(server.WSHandler())
 	defer mux.Close()
@@ -138,6 +167,9 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	if !containsString(methods, "tools.catalog") {
 		t.Fatalf("expected tools.catalog in methods list: %#v", methods)
 	}
+	if !containsString(methods, "mcp.status") || !containsString(methods, "mcp.tools") {
+		t.Fatalf("expected mcp methods in methods list: %#v", methods)
+	}
 
 	mustSendReq(t, conn, map[string]any{
 		"type":   "req",
@@ -152,6 +184,47 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	payload := frame["payload"].(map[string]any)
 	toolsList := payload["tools"].([]any)
 	assertTool(t, toolsList, "time_now")
+	assertTool(t, toolsList, "browser_open")
+
+	mustSendReq(t, conn, map[string]any{
+		"type":   "req",
+		"id":     "2b",
+		"method": "mcp.status",
+		"params": map[string]any{},
+	})
+	frame = mustReadFrame(t, conn, 2*time.Second)
+	if frame["id"] != "2b" || frame["ok"] != true {
+		t.Fatalf("unexpected mcp.status response: %#v", frame)
+	}
+	payload = frame["payload"].(map[string]any)
+	status := payload["status"].(map[string]any)
+	if status["available"] != true || status["toolPrefix"] != "mcp" || int(status["registeredTools"].(float64)) != 1 {
+		t.Fatalf("unexpected mcp.status payload: %#v", payload)
+	}
+	servers := status["servers"].([]any)
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 mcp server, got %#v", status)
+	}
+
+	mustSendReq(t, conn, map[string]any{
+		"type":   "req",
+		"id":     "2c",
+		"method": "mcp.tools",
+		"params": map[string]any{},
+	})
+	frame = mustReadFrame(t, conn, 2*time.Second)
+	if frame["id"] != "2c" || frame["ok"] != true {
+		t.Fatalf("unexpected mcp.tools response: %#v", frame)
+	}
+	payload = frame["payload"].(map[string]any)
+	mcpTools := payload["tools"].([]any)
+	if len(mcpTools) != 1 {
+		t.Fatalf("expected 1 mcp tool mapping, got %#v", payload)
+	}
+	toolMapping := mcpTools[0].(map[string]any)
+	if toolMapping["localName"] != "mcp_demo_echo" || toolMapping["serverName"] != "demo" || toolMapping["remoteName"] != "echo" {
+		t.Fatalf("unexpected mcp.tools payload: %#v", payload)
+	}
 
 	mustSendReq(t, conn, map[string]any{
 		"type":   "req",

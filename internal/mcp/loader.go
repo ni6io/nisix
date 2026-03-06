@@ -38,10 +38,36 @@ type Options struct {
 	Logger     *slog.Logger
 }
 
+type StatusSnapshot struct {
+	Available       bool           `json:"available"`
+	ConfigFile      string         `json:"configFile,omitempty"`
+	ToolPrefix      string         `json:"toolPrefix,omitempty"`
+	RegisteredTools int            `json:"registeredTools"`
+	Servers         []ServerStatus `json:"servers"`
+}
+
+type ServerStatus struct {
+	Name      string `json:"name"`
+	Transport string `json:"transport"`
+	ToolCount int    `json:"toolCount"`
+}
+
+type ToolMapping struct {
+	LocalName   string `json:"localName"`
+	ServerName  string `json:"serverName"`
+	RemoteName  string `json:"remoteName"`
+	Description string `json:"description,omitempty"`
+	Transport   string `json:"transport,omitempty"`
+}
+
 type Manager struct {
 	clients       []*Client
 	notifications chan Notification
 	logger        *slog.Logger
+	configFile    string
+	toolPrefix    string
+	servers       []ServerStatus
+	tools         []ToolMapping
 	wg            sync.WaitGroup
 	closeOnce     sync.Once
 }
@@ -94,10 +120,17 @@ func RegisterFromFile(ctx context.Context, reg *tools.Registry, path string, opt
 		clients:       make([]*Client, 0, len(serverNames)),
 		notifications: make(chan Notification, 256),
 		logger:        opts.Logger,
+		configFile:    path,
+		toolPrefix:    prefix,
+		servers:       make([]ServerStatus, 0, len(serverNames)),
 	}
 	registeredCount := 0
 	for _, serverName := range serverNames {
 		serverCfg := cfg.MCPServers[serverName]
+		transport, err := resolveTransport(serverCfg)
+		if err != nil {
+			return nil, 0, fmt.Errorf("mcp: server %s: %w", serverName, err)
+		}
 		client, err := StartClient(ctx, serverName, baseDir, serverCfg, opts.Logger)
 		if err != nil {
 			_ = manager.Close()
@@ -117,6 +150,11 @@ func RegisterFromFile(ctx context.Context, reg *tools.Registry, path string, opt
 		if safeServer == "" {
 			safeServer = "server"
 		}
+		serverStatus := ServerStatus{
+			Name:      serverName,
+			Transport: string(transport),
+			ToolCount: len(remoteTools),
+		}
 		for _, rt := range remoteTools {
 			toolName := uniqueToolName(existing, fmt.Sprintf("%s_%s_%s", prefix, safeServer, sanitizeName(rt.Name)))
 			existing[toolName] = struct{}{}
@@ -130,8 +168,16 @@ func RegisterFromFile(ctx context.Context, reg *tools.Registry, path string, opt
 				client:      client,
 			}
 			reg.Register(wrapped)
+			manager.tools = append(manager.tools, ToolMapping{
+				LocalName:   toolName,
+				ServerName:  serverName,
+				RemoteName:  rt.Name,
+				Description: strings.TrimSpace(rt.Description),
+				Transport:   string(transport),
+			})
 			registeredCount++
 		}
+		manager.servers = append(manager.servers, serverStatus)
 		manager.clients = append(manager.clients, client)
 		manager.wg.Add(1)
 		go manager.forwardClientNotifications(client)
@@ -145,6 +191,30 @@ func (m *Manager) Notifications() <-chan Notification {
 		return nil
 	}
 	return m.notifications
+}
+
+func (m *Manager) Status() StatusSnapshot {
+	if m == nil {
+		return StatusSnapshot{Available: false}
+	}
+	servers := make([]ServerStatus, len(m.servers))
+	copy(servers, m.servers)
+	return StatusSnapshot{
+		Available:       true,
+		ConfigFile:      m.configFile,
+		ToolPrefix:      m.toolPrefix,
+		RegisteredTools: len(m.tools),
+		Servers:         servers,
+	}
+}
+
+func (m *Manager) Tools() []ToolMapping {
+	if m == nil {
+		return nil
+	}
+	out := make([]ToolMapping, len(m.tools))
+	copy(out, m.tools)
+	return out
 }
 
 func (m *Manager) forwardClientNotifications(client *Client) {

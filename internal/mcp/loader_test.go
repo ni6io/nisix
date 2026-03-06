@@ -60,6 +60,17 @@ func TestRegisterFromFileRegistersAndExecutesTools_Stdio(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected one registered tool, got %d", count)
 	}
+	status := manager.Status()
+	if !status.Available || status.ToolPrefix != "mcp" || status.RegisteredTools != 1 {
+		t.Fatalf("unexpected manager status: %#v", status)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "demo" || status.Servers[0].Transport != "stdio" || status.Servers[0].ToolCount != 1 {
+		t.Fatalf("unexpected manager servers: %#v", status.Servers)
+	}
+	mappings := manager.Tools()
+	if len(mappings) != 1 || mappings[0].LocalName != "mcp_demo_echo" || mappings[0].ServerName != "demo" || mappings[0].RemoteName != "echo" {
+		t.Fatalf("unexpected tool mappings: %#v", mappings)
+	}
 	assertMCPToolWorks(t, reg, "mcp_demo_echo")
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ni6io/nisix/internal/bootstrap"
 	"github.com/ni6io/nisix/internal/domain"
+	"github.com/ni6io/nisix/internal/mcp"
 	"github.com/ni6io/nisix/internal/memory"
 	"github.com/ni6io/nisix/internal/model"
 	"github.com/ni6io/nisix/internal/profile"
@@ -24,6 +25,7 @@ var toolCallLinePattern = regexp.MustCompile(`^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*:\
 type Runtime struct {
 	tools               *tools.Registry
 	policy              toolpolicy.Policy
+	mcp                 mcpInspector
 	memory              *memory.Service
 	identity            domain.AgentIdentity
 	soulText            string
@@ -36,6 +38,11 @@ type Runtime struct {
 	profileUpdateMode   string
 	profileAutoDetect   bool
 	log                 *slog.Logger
+}
+
+type mcpInspector interface {
+	Status() mcp.StatusSnapshot
+	Tools() []mcp.ToolMapping
 }
 
 func New(
@@ -73,6 +80,10 @@ func New(
 		profileAutoDetect:   profileAutoDetect,
 		log:                 logger,
 	}
+}
+
+func (r *Runtime) SetMCPInspector(inspector mcpInspector) {
+	r.mcp = inspector
 }
 
 func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.AgentEvent {
@@ -315,6 +326,10 @@ func (r *Runtime) handleCommand(req domain.RunRequest, text string) (bool, strin
 		return true, r.listSkills()
 	case "/tools list", "/tool list":
 		return true, r.listTools()
+	case "/mcp status":
+		return true, r.mcpStatus()
+	case "/mcp tools":
+		return true, r.mcpTools()
 	}
 
 	cmd, ok := profile.ParseCommand(text)
@@ -595,4 +610,56 @@ func (r *Runtime) listTools() string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) mcpStatus() string {
+	if r.mcp == nil {
+		return "mcp runtime unavailable"
+	}
+	status := r.mcp.Status()
+	if !status.Available {
+		return "mcp runtime unavailable"
+	}
+	lines := []string{
+		fmt.Sprintf("mcp: available=true prefix=%s tools=%d servers=%d", valueOrDash(status.ToolPrefix), status.RegisteredTools, len(status.Servers)),
+	}
+	if strings.TrimSpace(status.ConfigFile) != "" {
+		lines = append(lines, "config: "+status.ConfigFile)
+	}
+	if len(status.Servers) == 0 {
+		lines = append(lines, "servers: none")
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines, "servers:")
+	for _, server := range status.Servers {
+		lines = append(lines, fmt.Sprintf("- %s [%s] tools=%d", server.Name, valueOrDash(server.Transport), server.ToolCount))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) mcpTools() string {
+	if r.mcp == nil {
+		return "mcp runtime unavailable"
+	}
+	mappings := r.mcp.Tools()
+	if len(mappings) == 0 {
+		return "mcp tools: none"
+	}
+	lines := []string{"mcp tools:"}
+	for _, mapping := range mappings {
+		line := fmt.Sprintf("- %s -> %s.%s", mapping.LocalName, mapping.ServerName, mapping.RemoteName)
+		if desc := strings.TrimSpace(mapping.Description); desc != "" {
+			line += " - " + desc
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func valueOrDash(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "-"
+	}
+	return s
 }

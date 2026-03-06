@@ -9,6 +9,7 @@ import (
 
 	"github.com/ni6io/nisix/internal/bootstrap"
 	"github.com/ni6io/nisix/internal/domain"
+	"github.com/ni6io/nisix/internal/mcp"
 	"github.com/ni6io/nisix/internal/profile"
 	"github.com/ni6io/nisix/internal/security"
 	"github.com/ni6io/nisix/internal/sessions"
@@ -35,6 +36,11 @@ type Authenticator interface {
 
 type EventObserver func(event domain.AgentEvent)
 
+type MCPInspector interface {
+	Status() mcp.StatusSnapshot
+	Tools() []mcp.ToolMapping
+}
+
 type Server struct {
 	router       Router
 	run          Runtime
@@ -45,6 +51,7 @@ type Server struct {
 	bootstrapSvc *bootstrap.Service
 	skillSvc     *skills.Service
 	toolsReg     *tools.Registry
+	mcp          MCPInspector
 	workspace    string
 	log          *slog.Logger
 }
@@ -75,6 +82,10 @@ func New(
 		workspace:    workspaceDir,
 		log:          logger,
 	}
+}
+
+func (s *Server) SetMCPInspector(inspector MCPInspector) {
+	s.mcp = inspector
 }
 
 func (s *Server) HandleInbound(ctx context.Context, token string, msg domain.InboundMessage) error {
@@ -134,6 +145,20 @@ func (s *Server) ToolsCatalog() []tools.Metadata {
 		return []tools.Metadata{}
 	}
 	return s.toolsReg.Catalog()
+}
+
+func (s *Server) MCPStatus() mcp.StatusSnapshot {
+	if s.mcp == nil {
+		return mcp.StatusSnapshot{Available: false}
+	}
+	return s.mcp.Status()
+}
+
+func (s *Server) MCPTools() []mcp.ToolMapping {
+	if s.mcp == nil {
+		return []mcp.ToolMapping{}
+	}
+	return s.mcp.Tools()
 }
 
 func (s *Server) ProfileGet(file string) (profile.GetResult, error) {

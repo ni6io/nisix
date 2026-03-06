@@ -89,6 +89,7 @@ func main() {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewBrowserTool())
 
 	var mcpManager *mcp.Manager
 	if cfg.MCP.EnabledValue() {
@@ -159,6 +160,7 @@ func main() {
 		cfg.Profile.AutoDetectEnabledValue(),
 		logger,
 	)
+	runtime.SetMCPInspector(mcpManager)
 
 	stdoutHub := channels.NewStdoutHub()
 	hub := channels.NewMultiHub(stdoutHub)
@@ -176,6 +178,7 @@ func main() {
 		workspaceDir,
 		logger,
 	)
+	srv.SetMCPInspector(mcpManager)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

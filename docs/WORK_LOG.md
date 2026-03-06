@@ -240,6 +240,38 @@ Use this as the running handoff log between sessions.
 ### Next Session First Step
 - Add `mcp.status`/`mcp.tools` debug command in chat/WS to inspect loaded MCP servers and tool mappings at runtime.
 
+## 2026-03-06 12:05 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `55e85ff`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Added MCP runtime inspection surfaces for chat and WS:
+  - Chat commands: `/mcp status` and `/mcp tools`.
+  - WS methods: `mcp.status` and `mcp.tools`.
+  - WS connect feature list now advertises both MCP methods.
+- Extended `internal/mcp.Manager` with read-only snapshots:
+  - status snapshot includes config path, tool prefix, registered tool count, and per-server transport/tool counts.
+  - tool mappings include local tool name to remote `server.tool` mapping.
+- Wired MCP inspector into daemon/runtime/gateway without changing constructor fanout:
+  - added setter-based injection from `cmd/nisixd/main.go`.
+- Added tests:
+  - runtime command tests for `/mcp status` and `/mcp tools`.
+  - WS integration assertions for `mcp.status` and `mcp.tools`.
+  - MCP manager test coverage for status/tool snapshots.
+- Updated tracker current-state notes for MCP inspection support.
+
+### Validation
+- `go test ./internal/mcp ./internal/agentruntime ./internal/gateway`: pass
+
+### Risks / Follow-up
+- `mcp.status` currently reports startup-loaded state, not active health probes; if live liveness is needed, add periodic ping/heartbeat semantics.
+
+### Next Session First Step
+- Start P4 foundation: define typed plugin runtime interfaces and sandbox policy contract, reusing MCP/tool metadata shapes where possible.
+
 
 ## 2026-03-05 22:01 (Asia/Ho_Chi_Minh)
 

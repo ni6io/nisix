@@ -86,6 +86,10 @@ type SkillsListParams struct {
 
 type ToolsCatalogParams struct{}
 
+type MCPStatusParams struct{}
+
+type MCPToolsParams struct{}
+
 type ChatAbortParams struct {
 	RunID      string `json:"runId"`
 	SessionKey string `json:"sessionKey"`
