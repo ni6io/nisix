@@ -17,7 +17,7 @@ Go skeleton for your OpenClaw-inspired assistant architecture.
 - `identity`: loads `IDENTITY.md`.
 - `soul`: loads `SOUL.md`.
 - `tools`: tool registry + sample `time_now` tool.
-- `mcp`: loads MCP stdio servers from `mcp.json` and registers remote MCP tools.
+- `mcp`: loads MCP servers from `mcp.json` (`stdio`, `streamable_http`, `sse`) and registers remote MCP tools.
 - `toolpolicy`: allow/deny policy checks.
 - `sessions`: persistent `sessions.json` + transcript JSONL appends.
 - `memory`: workspace markdown search service.
@@ -236,16 +236,39 @@ Add MCP settings in runtime config:
 }
 ```
 
+Supported MCP transports:
+
+- `stdio`
+- `streamable_http`
+- `sse` (legacy)
+
+Notes:
+
+- You can configure transport with either `transport` or `type`.
+- `type: "http"` is treated as `streamable_http`.
+
 Define MCP servers in `mcp.json` (see `mcp.json.example`):
 
 ```json
 {
   "mcpServers": {
     "filesystem": {
+      "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace/main"],
       "env": {},
       "cwd": "."
+    },
+    "remote_streamable": {
+      "transport": "streamable_http",
+      "url": "http://127.0.0.1:3001/mcp",
+      "headers": {"Authorization": "Bearer <TOKEN>"}
+    },
+    "remote_sse": {
+      "transport": "sse",
+      "url": "http://127.0.0.1:3002/sse",
+      "messageUrl": "http://127.0.0.1:3002/messages",
+      "headers": {"Authorization": "Bearer <TOKEN>"}
     }
   }
 }
@@ -371,8 +394,4 @@ Migration note:
 2. Add typed plugin/skill runtime + sandboxed tool execution.
 3. Add session observability pack (`runId/sessionKey` logging conventions and dashboards).
 4. Migrate model-output tool bridge to provider-native structured function calling.
-
-
-
-
 

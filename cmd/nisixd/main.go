@@ -22,6 +22,7 @@ import (
 	"github.com/ni6io/nisix/internal/domain"
 	"github.com/ni6io/nisix/internal/gateway"
 	"github.com/ni6io/nisix/internal/identity"
+	"github.com/ni6io/nisix/internal/mcp"
 	"github.com/ni6io/nisix/internal/memory"
 	"github.com/ni6io/nisix/internal/model"
 	"github.com/ni6io/nisix/internal/observability"
@@ -88,6 +89,35 @@ func main() {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+
+	var mcpManager *mcp.Manager
+	if cfg.MCP.EnabledValue() {
+		manager, count, mcpErr := mcp.RegisterFromFile(context.Background(), reg, cfg.MCP.ConfigFile, mcp.Options{
+			ToolPrefix: cfg.MCP.ToolPrefix,
+			Logger:     logger,
+		})
+		if mcpErr != nil {
+			log.Fatalf("load mcp tools: %v", mcpErr)
+		}
+		mcpManager = manager
+		if count > 0 {
+			logger.Info("mcp.tools.loaded", "count", count, "configFile", cfg.MCP.ConfigFile)
+		}
+		if mcpManager != nil {
+			go func() {
+				for note := range mcpManager.Notifications() {
+					logger.Info("mcp.notification", "server", note.Server, "method", note.Method, "params", string(note.Params))
+				}
+			}()
+		}
+	}
+	if mcpManager != nil {
+		defer func() {
+			if err := mcpManager.Close(); err != nil {
+				logger.Warn("mcp.close.error", "err", err)
+			}
+		}()
+	}
 
 	identitySvc := identity.NewService(workspaceDir)
 	soulSvc := soul.NewService(workspaceDir)

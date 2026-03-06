@@ -1,6 +1,8 @@
 package channels
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,5 +126,37 @@ func TestTelegramAccountIDOption(t *testing.T) {
 	b := NewTelegramAdapter("x", TelegramOptions{AccountID: "Work_Bot"})
 	if b.accountID != "work_bot" {
 		t.Fatalf("expected normalized account id work_bot, got %q", b.accountID)
+	}
+}
+
+func TestIsTransientNetErr(t *testing.T) {
+	errs := []error{
+		fmt.Errorf("read: connection reset by peer"),
+		fmt.Errorf("use of closed network connection"),
+	}
+	for _, e := range errs {
+		if !isTransientNetErr(e) {
+			t.Fatalf("expected transient for %v", e)
+		}
+	}
+	if isTransientNetErr(fmt.Errorf("other error")) {
+		t.Fatal("expected non-transient")
+	}
+}
+
+func TestChunkTelegramText(t *testing.T) {
+	long := strings.Repeat("word ", 1000) // 5000+ chars
+	chunks := chunkTelegramText(long, telegramMaxMessageLen)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	rejoined := strings.Join(chunks, "")
+	if rejoined != long {
+		t.Fatal("rejoined text does not match original")
+	}
+	for i, c := range chunks {
+		if len([]rune(c)) > telegramMaxMessageLen {
+			t.Fatalf("chunk %d exceeds limit: %d", i, len([]rune(c)))
+		}
 	}
 }

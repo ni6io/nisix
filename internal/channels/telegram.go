@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -130,22 +132,66 @@ type telegramUser struct {
 	IsBot bool  `json:"is_bot"`
 }
 
+const telegramMaxMessageLen = 4000
+
+func chunkTelegramText(text string, limit int) []string {
+	if limit <= 0 {
+		return []string{text}
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return []string{text}
+	}
+
+	out := make([]string, 0, (len(runes)/limit)+1)
+	start := 0
+	for start < len(runes) {
+		end := start + limit
+		if end > len(runes) {
+			end = len(runes)
+		}
+
+		split := end
+		for i := end - 1; i > start; i-- {
+			if runes[i] == '\n' {
+				split = i
+				break
+			}
+			if runes[i] == ' ' && split == end {
+				split = i
+			}
+		}
+		if split == start {
+			split = end
+		}
+		out = append(out, string(runes[start:split]))
+		start = split
+	}
+	return out
+}
+
 func (t *TelegramAdapter) Send(ctx context.Context, msg domain.OutboundMessage) error {
 	chatID, err := strconv.ParseInt(strings.TrimSpace(msg.TargetID), 10, 64)
 	if err != nil {
 		return fmt.Errorf("telegram: invalid target id %q", msg.TargetID)
 	}
-	body := map[string]any{
-		"chat_id": chatID,
-		"text":    msg.Text,
-	}
-	if threadID := strings.TrimSpace(msg.ThreadID); threadID != "" {
-		if parsed, err := strconv.Atoi(threadID); err == nil {
-			body["message_thread_id"] = parsed
+
+	chunks := chunkTelegramText(msg.Text, telegramMaxMessageLen)
+	for _, text := range chunks {
+		body := map[string]any{
+			"chat_id": chatID,
+			"text":    text,
+		}
+		if threadID := strings.TrimSpace(msg.ThreadID); threadID != "" {
+			if parsed, err := strconv.Atoi(threadID); err == nil {
+				body["message_thread_id"] = parsed
+			}
+		}
+		if _, err := t.call(ctx, "sendMessage", body); err != nil {
+			return err
 		}
 	}
-	_, err = t.call(ctx, "sendMessage", body)
-	return err
+	return nil
 }
 
 func (t *TelegramAdapter) RunPolling(
@@ -266,6 +312,30 @@ func (t *TelegramAdapter) call(ctx context.Context, method string, payload map[s
 	if err != nil {
 		return nil, err
 	}
+
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		respBody, err := t.doHTTP(ctx, endpoint, body)
+		if err == nil {
+			return respBody, nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		if attempt == maxAttempts || !isTransientNetErr(err) {
+			return nil, err
+		}
+		backoff := time.Duration(attempt) * 250 * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return nil, fmt.Errorf("telegram: unexpected retry exhaustion")
+}
+
+func (t *TelegramAdapter) doHTTP(ctx context.Context, endpoint string, body []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -352,6 +422,30 @@ func normalizeAccountID(v string) string {
 func normalizeUsername(v string) string {
 	u := strings.TrimSpace(strings.ToLower(v))
 	return strings.TrimPrefix(u, "@")
+}
+
+func isTransientNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		if ne.Timeout() {
+			return true
+		}
+		// Some net errors don't mark Temporary but are worth retrying.
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "connection reset by peer") {
+		return true
+	}
+	if strings.Contains(msg, "use of closed network connection") {
+		return true
+	}
+	if strings.Contains(msg, "connection refused") {
+		return true
+	}
+	return false
 }
 
 func toSet(values []string) map[string]struct{} {
