@@ -257,15 +257,17 @@ func (s *Server) handleInbound(
 		if evt.Text == "" {
 			continue
 		}
-		if err := s.hub.Send(ctx, domain.OutboundMessage{
-			Channel:    msg.Channel,
-			AccountID:  msg.AccountID,
-			TargetID:   msg.PeerID,
-			ThreadID:   msg.ThreadID,
-			SessionKey: route.SessionKey,
-			Text:       evt.Text,
-		}); err != nil {
-			return err
+		if shouldSendEventToChannel(evt) {
+			if err := s.hub.Send(ctx, domain.OutboundMessage{
+				Channel:    msg.Channel,
+				AccountID:  msg.AccountID,
+				TargetID:   msg.PeerID,
+				ThreadID:   msg.ThreadID,
+				SessionKey: route.SessionKey,
+				Text:       evt.Text,
+			}); err != nil {
+				return err
+			}
 		}
 		if s.sessions != nil {
 			if err := s.sessions.AppendWithOptions(sessionEntry, "assistant", evt.Text, sessions.AppendOptions{
@@ -282,6 +284,10 @@ func (s *Server) handleInbound(
 		}
 	}
 	return nil
+}
+
+func shouldSendEventToChannel(evt domain.AgentEvent) bool {
+	return strings.TrimSpace(evt.Kind) != "tool"
 }
 
 func mapAgentEventType(kind string) string {

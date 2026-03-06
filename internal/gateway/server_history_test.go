@@ -33,6 +33,15 @@ func (r *captureRuntime) Run(_ context.Context, req domain.RunRequest) <-chan do
 	return out
 }
 
+type captureHub struct {
+	messages []domain.OutboundMessage
+}
+
+func (h *captureHub) Send(_ context.Context, msg domain.OutboundMessage) error {
+	h.messages = append(h.messages, msg)
+	return nil
+}
+
 func TestHandleInboundPassesRecentConversationHistoryToRuntime(t *testing.T) {
 	cfg := config.Config{
 		Agents: config.AgentsConfig{
@@ -193,4 +202,67 @@ func TestHandleInboundSummarizesOlderTranscriptMessages(t *testing.T) {
 	if !strings.Contains(req.ConversationSummary, "message 1970-01-01T00:00:01Z") {
 		t.Fatalf("expected summary to mention older transcript content, got %q", req.ConversationSummary)
 	}
+}
+
+func TestHandleInboundDoesNotSendRawToolEventsToChannel(t *testing.T) {
+	cfg := config.Config{
+		Agents: config.AgentsConfig{
+			DefaultID: "main",
+			List:      []config.AgentConfig{{ID: "main", Workspace: t.TempDir()}},
+		},
+		Bindings: []config.BindingRule{{
+			AgentID: "main",
+			Match: config.BindingMatch{
+				Channel:   "telegram",
+				AccountID: "*",
+			},
+		}},
+	}
+
+	hub := &captureHub{}
+	server := New(
+		router.NewResolver(cfg),
+		runtimeFunc(func(_ context.Context, req domain.RunRequest) <-chan domain.AgentEvent {
+			out := make(chan domain.AgentEvent, 2)
+			out <- domain.AgentEvent{Kind: "tool", RunID: "run-1", SessionKey: req.SessionKey, Text: "tool shell result: map[...]"}
+			out <- domain.AgentEvent{Kind: "final", RunID: "run-1", SessionKey: req.SessionKey, Text: "AGENTS.md\nTOOLS.md", Done: true}
+			close(out)
+			return out
+		}),
+		hub,
+		security.NewTokenAuthenticator("test-token"),
+		sessions.NewManager(sessions.NewInMemoryStore(), t.TempDir()),
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	err := server.HandleInbound(context.Background(), "test-token", domain.InboundMessage{
+		Channel:   "telegram",
+		AccountID: "default",
+		PeerID:    "123",
+		PeerType:  domain.ChatTypeDirect,
+		UserID:    "123",
+		Text:      "list files",
+		RunID:     "run-1",
+		At:        time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("handle inbound: %v", err)
+	}
+	if len(hub.messages) != 1 {
+		t.Fatalf("expected only final message to be sent to channel, got %#v", hub.messages)
+	}
+	if hub.messages[0].Text != "AGENTS.md\nTOOLS.md" {
+		t.Fatalf("unexpected outbound final text: %#v", hub.messages[0])
+	}
+}
+
+type runtimeFunc func(ctx context.Context, req domain.RunRequest) <-chan domain.AgentEvent
+
+func (f runtimeFunc) Run(ctx context.Context, req domain.RunRequest) <-chan domain.AgentEvent {
+	return f(ctx, req)
 }

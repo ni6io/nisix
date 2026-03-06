@@ -21,6 +21,7 @@ import (
 )
 
 var toolCallLinePattern = regexp.MustCompile(`^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*:\s*)?([a-z][a-z0-9_]*)\s*\(\s*(\{.*\})?\s*\)\s*$`)
+var inlineCodePattern = regexp.MustCompile("`([^`]+)`")
 
 type Runtime struct {
 	tools               *tools.Registry
@@ -97,6 +98,7 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 		}
 		text := strings.TrimSpace(req.Message.Text)
 		skillContext := ""
+		toolContext := r.buildToolPrompt()
 
 		if handled, response := r.handleCommand(req, text); handled {
 			out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: response, Done: true}
@@ -281,6 +283,7 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 				SoulText:            soulText,
 				ProjectContext:      projectContext,
 				SkillPrompt:         skillContext,
+				ToolPrompt:          toolContext,
 				MemoryHits:          memHits,
 			})
 			if err != nil {
@@ -313,6 +316,9 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 		if strings.TrimSpace(skillContext) != "" {
 			reply += "\n\n" + skillContext
 		}
+		if strings.TrimSpace(toolContext) != "" {
+			reply += "\n\n" + toolContext
+		}
 		if strings.TrimSpace(projectContext) != "" {
 			reply += "\n\n" + projectContext
 		}
@@ -320,6 +326,117 @@ func (r *Runtime) Run(ctx context.Context, req domain.RunRequest) <-chan domain.
 		out <- domain.AgentEvent{Kind: "final", RunID: runID, SessionKey: req.SessionKey, Text: reply, Done: true}
 	}()
 	return out
+}
+
+func (r *Runtime) buildToolPrompt() string {
+	if r.tools == nil {
+		return ""
+	}
+	catalog := r.tools.Catalog()
+	if len(catalog) == 0 {
+		return ""
+	}
+
+	lines := []string{
+		"If a tool is required, respond with exactly one tool call and no extra prose.",
+		"Valid syntax:",
+		"- tool_name()",
+		"- tool_name({\"key\":\"value\"})",
+		"Never fabricate command output, filesystem listings, timestamps, or external results. Use a tool whenever the answer depends on runtime state.",
+		"Only call tools from this allowlisted set:",
+	}
+	allowedCount := 0
+	for _, tool := range catalog {
+		if !r.policy.Allowed(tool.Name) {
+			continue
+		}
+		line := fmt.Sprintf("- %s", tool.Name)
+		if desc := strings.TrimSpace(tool.Description); desc != "" {
+			line += " - " + desc
+		}
+		if required := describeRequiredFields(tool.InputSchema); required != "" {
+			line += " Required: " + required + "."
+		}
+		if example := buildToolExample(tool.Name, tool.InputSchema); example != "" {
+			line += " Example: " + example + "."
+		}
+		lines = append(lines, line)
+		allowedCount++
+	}
+	if allowedCount == 0 {
+		return ""
+	}
+	lines = append(lines, "Do not claim a tool was used unless you emit the exact tool call.")
+	return strings.Join(lines, "\n")
+}
+
+func describeRequiredFields(schema map[string]any) string {
+	requiredAny, ok := schema["required"]
+	if !ok {
+		return ""
+	}
+	requiredItems, ok := requiredAny.([]any)
+	if !ok || len(requiredItems) == 0 {
+		return ""
+	}
+	fields := make([]string, 0, len(requiredItems))
+	for _, item := range requiredItems {
+		name := strings.TrimSpace(fmt.Sprint(item))
+		if name != "" {
+			fields = append(fields, name)
+		}
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, ", ")
+}
+
+func buildToolExample(name string, schema map[string]any) string {
+	requiredAny, ok := schema["required"]
+	if !ok {
+		return name + "()"
+	}
+	requiredItems, ok := requiredAny.([]any)
+	if !ok || len(requiredItems) == 0 {
+		return name + "()"
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	args := make(map[string]any, len(requiredItems))
+	for _, item := range requiredItems {
+		field := strings.TrimSpace(fmt.Sprint(item))
+		if field == "" {
+			continue
+		}
+		args[field] = exampleValueForProperty(field, properties[field])
+	}
+	if len(args) == 0 {
+		return name + "()"
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s(%s)", name, string(encoded))
+}
+
+func exampleValueForProperty(name string, property any) any {
+	propMap, _ := property.(map[string]any)
+	propType := strings.TrimSpace(fmt.Sprint(propMap["type"]))
+	switch strings.ToLower(name) {
+	case "command":
+		return "ls"
+	case "path":
+		return "."
+	}
+	switch propType {
+	case "integer", "number":
+		return 1
+	case "boolean":
+		return true
+	default:
+		return "value"
+	}
 }
 
 func (r *Runtime) handleCommand(req domain.RunRequest, text string) (bool, string) {
@@ -498,18 +615,7 @@ func (r *Runtime) maybeExecuteGeneratedToolCall(ctx context.Context, generated s
 	}
 
 	eventText := fmt.Sprintf("tool %s result: %+v", name, res.Data)
-	if name == "time_now" {
-		if data, ok := res.Data.(map[string]any); ok {
-			if now, ok := data["now"]; ok {
-				return eventText, fmt.Sprintf("Server time now: %v", now), toolCall, true
-			}
-		}
-	}
-	encoded, marshalErr := json.Marshal(res.Data)
-	if marshalErr == nil {
-		return eventText, string(encoded), toolCall, true
-	}
-	return eventText, eventText, toolCall, true
+	return eventText, formatToolResultForUser(name, res.Data), toolCall, true
 }
 
 func (r *Runtime) parseToolCallFromGeneratedText(generated string) (string, map[string]any, bool, error) {
@@ -524,32 +630,154 @@ func (r *Runtime) parseToolCallFromGeneratedText(generated string) (string, map[
 		return "", nil, false, nil
 	}
 
+	for _, match := range inlineCodePattern.FindAllStringSubmatch(generated, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		if name, input, found, err := parseToolCallCandidate(match[1], registered); found || err != nil {
+			return name, input, found, err
+		}
+	}
+
 	lines := strings.Split(generated, "\n")
 	for _, rawLine := range lines {
 		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue
 		}
-		line = strings.Trim(line, "`")
-		match := toolCallLinePattern.FindStringSubmatch(line)
-		if len(match) != 3 {
-			continue
+		if name, input, found, err := parseToolCallCandidate(line, registered); found || err != nil {
+			return name, input, found, err
 		}
-		name := match[1]
-		if _, ok := registered[name]; !ok {
-			continue
-		}
-		argsRaw := strings.TrimSpace(match[2])
-		if argsRaw == "" {
-			return name, map[string]any{}, true, nil
-		}
-		var input map[string]any
-		if err := json.Unmarshal([]byte(argsRaw), &input); err != nil {
-			return "", nil, true, fmt.Errorf("invalid tool input JSON: %w", err)
-		}
-		return name, input, true, nil
 	}
 	return "", nil, false, nil
+}
+
+func parseToolCallCandidate(candidate string, registered map[string]struct{}) (string, map[string]any, bool, error) {
+	candidate = strings.TrimSpace(strings.Trim(candidate, "`"))
+	match := toolCallLinePattern.FindStringSubmatch(candidate)
+	if len(match) != 3 {
+		return "", nil, false, nil
+	}
+	name := match[1]
+	if _, ok := registered[name]; !ok {
+		return "", nil, false, nil
+	}
+	argsRaw := strings.TrimSpace(match[2])
+	if argsRaw == "" {
+		return name, map[string]any{}, true, nil
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(argsRaw), &input); err != nil {
+		return "", nil, true, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	return name, input, true, nil
+}
+
+func formatToolResultForUser(name string, data any) string {
+	if formatted, ok := formatNamedToolResult(name, data); ok {
+		return formatted
+	}
+	if formatted, ok := formatStructuredToolResult(data); ok {
+		return formatted
+	}
+	encoded, marshalErr := json.Marshal(data)
+	if marshalErr == nil {
+		return string(encoded)
+	}
+	return fmt.Sprintf("%+v", data)
+}
+
+func formatNamedToolResult(name string, data any) (string, bool) {
+	payload, ok := data.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	switch name {
+	case "time_now":
+		if now, ok := payload["now"]; ok {
+			return fmt.Sprintf("Server time now: %v", now), true
+		}
+	case "shell":
+		return formatShellResult(payload)
+	}
+	return "", false
+}
+
+func formatShellResult(payload map[string]any) (string, bool) {
+	stdout := strings.TrimSpace(asString(payload["stdout"]))
+	stderr := strings.TrimSpace(asString(payload["stderr"]))
+	exitCode, _ := asInt(payload["exitCode"])
+	timedOut, _ := payload["timedOut"].(bool)
+
+	switch {
+	case stdout != "":
+		return stdout, true
+	case stderr != "":
+		return stderr, true
+	case timedOut:
+		return "Command timed out.", true
+	case exitCode != 0:
+		return fmt.Sprintf("Command exited with status %d.", exitCode), true
+	default:
+		return "Command completed successfully.", true
+	}
+}
+
+func formatStructuredToolResult(data any) (string, bool) {
+	payload, ok := data.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if content, ok := payload["content"].([]any); ok {
+		parts := make([]string, 0, len(content))
+		for _, item := range content {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			text := strings.TrimSpace(asString(itemMap["text"]))
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n\n"), true
+		}
+	}
+	if structured, ok := payload["structuredContent"].(map[string]any); ok {
+		if text := strings.TrimSpace(asString(structured["content"])); text != "" {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+func asString(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case []byte:
+		return string(value)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func asInt(v any) (int, bool) {
+	switch value := v.(type) {
+	case int:
+		return value, true
+	case int32:
+		return int(value), true
+	case int64:
+		return int(value), true
+	case float64:
+		return int(value), true
+	case float32:
+		return int(value), true
+	default:
+		return 0, false
+	}
 }
 
 func (r *Runtime) listSkills() string {

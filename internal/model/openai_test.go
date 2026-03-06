@@ -62,26 +62,31 @@ func TestOpenAIClientGenerateUsesResponsesAPI(t *testing.T) {
 	if captured["model"] != "gpt-5-codex" {
 		t.Fatalf("unexpected model: %#v", captured["model"])
 	}
+	instructions, _ := captured["instructions"].(string)
+	if !strings.Contains(instructions, "SOUL instructions:") || !strings.Contains(instructions, "Active skills:") {
+		t.Fatalf("instructions missing expected sections: %q", instructions)
+	}
+	if !strings.Contains(instructions, "Conversation summary:") {
+		t.Fatalf("expected conversation summary in instructions: %q", instructions)
+	}
 	input := captured["input"].([]any)
-	if len(input) != 4 {
-		t.Fatalf("expected system + history + user input, got %#v", input)
+	if len(input) != 3 {
+		t.Fatalf("expected history + user input, got %#v", input)
 	}
-	systemMsg := input[0].(map[string]any)
-	content := systemMsg["content"].([]any)[0].(map[string]any)
-	systemText := content["text"].(string)
-	if !strings.Contains(systemText, "SOUL instructions:") || !strings.Contains(systemText, "Active skills:") {
-		t.Fatalf("system prompt missing expected sections: %q", systemText)
-	}
-	if !strings.Contains(systemText, "Conversation summary:") {
-		t.Fatalf("expected conversation summary in system prompt: %q", systemText)
-	}
-	historyUser := input[1].(map[string]any)
+	historyUser := input[0].(map[string]any)
 	if historyUser["role"] != "user" {
 		t.Fatalf("expected history user role, got %#v", historyUser)
 	}
-	historyText := historyUser["content"].([]any)[0].(map[string]any)["text"].(string)
+	historyText := historyUser["content"].(string)
 	if historyText != "Remember my name is Thanh." {
 		t.Fatalf("unexpected history text: %q", historyText)
+	}
+	historyAssistant := input[1].(map[string]any)
+	if historyAssistant["role"] != "assistant" {
+		t.Fatalf("expected assistant history role, got %#v", historyAssistant)
+	}
+	if historyAssistant["content"] != "Understood." {
+		t.Fatalf("unexpected assistant history text: %#v", historyAssistant["content"])
 	}
 }
 

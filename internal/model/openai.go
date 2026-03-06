@@ -70,8 +70,9 @@ func (c *OpenAIClient) Generate(ctx context.Context, req Request) (string, error
 	}
 
 	body := map[string]any{
-		"model": c.model,
-		"input": buildOpenAIInput(req),
+		"model":        c.model,
+		"instructions": BuildSystemPrompt(req),
+		"input":        buildOpenAIInput(req),
 	}
 
 	payload, err := json.Marshal(body)
@@ -122,16 +123,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, req Request) (string, error
 }
 
 func buildOpenAIInput(req Request) []map[string]any {
-	input := make([]map[string]any, 0, len(req.History)+2)
-	input = append(input, map[string]any{
-		"role": "system",
-		"content": []map[string]any{
-			{
-				"type": "input_text",
-				"text": BuildSystemPrompt(req),
-			},
-		},
-	})
+	input := make([]map[string]any, 0, len(req.History)+1)
 	for _, msg := range req.History {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
 		if role != "assistant" {
@@ -142,23 +134,13 @@ func buildOpenAIInput(req Request) []map[string]any {
 			continue
 		}
 		input = append(input, map[string]any{
-			"role": role,
-			"content": []map[string]any{
-				{
-					"type": "input_text",
-					"text": text,
-				},
-			},
+			"role":    role,
+			"content": text,
 		})
 	}
 	input = append(input, map[string]any{
-		"role": "user",
-		"content": []map[string]any{
-			{
-				"type": "input_text",
-				"text": strings.TrimSpace(req.UserText),
-			},
-		},
+		"role":    "user",
+		"content": strings.TrimSpace(req.UserText),
 	})
 	return input
 }
