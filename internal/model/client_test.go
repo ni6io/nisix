@@ -17,6 +17,7 @@ func TestBuildSystemPromptOrder(t *testing.T) {
 		SoulText:            "Be concise.",
 		ProjectContext:      "# Project Context\n\n## AGENTS.md\nagents\n\n## TOOLS.md\ntools\n\n## USER.md\nuser",
 		SkillPrompt:         "## Skill: architecture\nUse phased rollout.",
+		ToolPrompt:          "- time_now - Returns server time.",
 		ConversationSummary: "Earlier the user introduced themself.",
 		MemoryHits:          []string{"/tmp/memory/a.md"},
 	}
@@ -38,6 +39,9 @@ func TestBuildSystemPromptOrder(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Active skills:") || !strings.Contains(prompt, "Relevant memory files:") {
 		t.Fatalf("missing skill/memory sections: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Available runtime tools:") {
+		t.Fatalf("missing runtime tools section: %q", prompt)
 	}
 	if !strings.Contains(prompt, "Conversation summary:") {
 		t.Fatalf("missing conversation summary section: %q", prompt)

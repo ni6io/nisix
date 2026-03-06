@@ -29,6 +29,47 @@ Use this as the running handoff log between sessions.
 
 ---
 
+## 2026-03-06 15:29 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `codex/fix-tool-trigger-flow`
+- Last commit: `42e95df`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Fixed OpenAI Responses payload compatibility for multi-turn chat:
+  - moved system prompt into `instructions`
+  - sent chat history as `input` messages instead of `input_text` blocks that broke assistant-history turns
+- Hardened tool trigger flow:
+  - `toolpolicy.Policy` now supports wildcard suffix patterns like `mcp_filesystem_*`
+  - runtime injects the actual allowlisted tool catalog into the model prompt, including required args and examples
+  - runtime parses inline backticked tool calls in addition to standalone tool-call lines
+- Improved tool result UX:
+  - channel delivery now suppresses raw `tool` events
+  - `shell` final replies prefer clean `stdout`/`stderr` text instead of dumping raw maps/JSON
+  - MCP final replies prefer textual `content[].text` / `structuredContent.content`
+- Added regression coverage:
+  - OpenAI payload tests for `instructions + input`
+  - toolpolicy wildcard matching tests
+  - runtime tests for inline tool calls, tool prompt injection, and formatted tool results
+  - gateway test to ensure raw tool events are not sent to user channels
+- Manual verification on an isolated daemon instance:
+  - `shell` executed `ls /etc` end-to-end
+  - MCP filesystem call executed successfully when given an allowed absolute path
+
+### Validation
+- `go test ./...`: pass
+- `go vet ./...`: not run
+- Manual checks:
+  - ran isolated `nisixd` on a separate port and verified real `shell`/MCP tool execution paths
+
+### Risks / Follow-up
+- Tool calling is still text-mediated; model quality still affects whether it emits the right call shape.
+- Filesystem MCP currently requires paths aligned with the server's allowed-root config; prompts/examples should be refined further to avoid `path: "."` misfires.
+
+### Next Session First Step
+- Migrate from text-parsed tool calls to provider-native structured tool calling so trigger logic no longer depends on output formatting.
+
 ## 2026-03-06 14:44 (Asia/Ho_Chi_Minh)
 
 ### Context Loaded

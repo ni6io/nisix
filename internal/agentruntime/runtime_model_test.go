@@ -22,6 +22,19 @@ type fakeModel struct {
 	lastReq model.Request
 }
 
+type fakeExecTool struct {
+	name string
+	data any
+}
+
+func (t fakeExecTool) Name() string {
+	return t.name
+}
+
+func (t fakeExecTool) Execute(_ context.Context, _ map[string]any) (tools.Result, error) {
+	return tools.Result{Data: t.data}, nil
+}
+
 func (m *fakeModel) Generate(_ context.Context, req model.Request) (string, error) {
 	m.calls++
 	m.lastReq = req
@@ -160,6 +173,58 @@ func TestRuntimePassesConversationSummaryToModel(t *testing.T) {
 	}
 }
 
+func TestRuntimePassesAllowedToolPromptToModel(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "ok"}
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewShellTool(workspace))
+
+	r := New(
+		reg,
+		toolpolicy.Policy{Allow: []string{"time_now"}},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	events := r.Run(context.Background(), domain.RunRequest{
+		AgentID:    "main",
+		SessionKey: "agent:main:test-tools",
+		Message: domain.InboundMessage{
+			Text: "what can you do",
+			At:   time.Now(),
+		},
+	})
+
+	for range events {
+	}
+	if !strings.Contains(fm.lastReq.ToolPrompt, "time_now") {
+		t.Fatalf("expected allowed tool in tool prompt, got %q", fm.lastReq.ToolPrompt)
+	}
+	if strings.Contains(fm.lastReq.ToolPrompt, "shell") {
+		t.Fatalf("expected blocked tool to be omitted from tool prompt, got %q", fm.lastReq.ToolPrompt)
+	}
+	if !strings.Contains(fm.lastReq.ToolPrompt, "Do not claim a tool was used unless you emit the exact tool call.") {
+		t.Fatalf("expected strict tool instruction, got %q", fm.lastReq.ToolPrompt)
+	}
+	if !strings.Contains(fm.lastReq.ToolPrompt, "Never fabricate command output") {
+		t.Fatalf("expected anti-fabrication tool instruction, got %q", fm.lastReq.ToolPrompt)
+	}
+	if !strings.Contains(fm.lastReq.ToolPrompt, "Example: time_now()") {
+		t.Fatalf("expected tool example in prompt, got %q", fm.lastReq.ToolPrompt)
+	}
+}
+
 func TestRuntimeExecutesToolCallFromModelOutput(t *testing.T) {
 	workspace := t.TempDir()
 	fm := &fakeModel{
@@ -215,6 +280,58 @@ func TestRuntimeExecutesToolCallFromModelOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeExecutesInlineBacktickedToolCallFromModelOutput(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{
+		reply: "Da goi `time_now()` de lay gio he thong.",
+	}
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewNowTool())
+
+	r := New(
+		reg,
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	events := r.Run(context.Background(), domain.RunRequest{
+		AgentID:    "main",
+		SessionKey: "agent:main:test-inline-tool",
+		Message: domain.InboundMessage{
+			Text: "what server time now",
+			At:   time.Now(),
+		},
+	})
+
+	final := ""
+	toolEvent := ""
+	for evt := range events {
+		if evt.Kind == "tool" {
+			toolEvent = evt.Text
+		}
+		if evt.Done {
+			final = evt.Text
+		}
+	}
+	if !strings.Contains(toolEvent, "tool time_now result:") {
+		t.Fatalf("expected inline backticked tool call to execute, got %q", toolEvent)
+	}
+	if !strings.HasPrefix(final, "Server time now: ") {
+		t.Fatalf("expected server-time final output, got %q", final)
+	}
+}
+
 func TestRuntimeBlocksToolCallFromModelOutputByPolicy(t *testing.T) {
 	workspace := t.TempDir()
 	fm := &fakeModel{reply: "time_now()"}
@@ -255,5 +372,111 @@ func TestRuntimeBlocksToolCallFromModelOutputByPolicy(t *testing.T) {
 	}
 	if final != "tool blocked by policy" {
 		t.Fatalf("expected blocked message, got %q", final)
+	}
+}
+
+func TestRuntimeFormatsShellToolResultForUser(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "shell({\"command\":\"ls\"})"}
+	reg := tools.NewRegistry()
+	reg.Register(fakeExecTool{
+		name: "shell",
+		data: map[string]any{
+			"command":   "ls",
+			"cwd":       workspace,
+			"exitCode":  0,
+			"stdout":    "AGENTS.md\nTOOLS.md\n",
+			"stderr":    "",
+			"timedOut":  false,
+			"truncated": false,
+		},
+	})
+
+	r := New(
+		reg,
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	final := ""
+	for evt := range r.Run(context.Background(), domain.RunRequest{
+		AgentID:    "main",
+		SessionKey: "agent:main:test-shell-format",
+		Message: domain.InboundMessage{
+			Text: "list files",
+			At:   time.Now(),
+		},
+	}) {
+		if evt.Done {
+			final = evt.Text
+		}
+	}
+	if final != "AGENTS.md\nTOOLS.md" {
+		t.Fatalf("expected shell stdout only, got %q", final)
+	}
+}
+
+func TestRuntimeFormatsMCPToolResultForUser(t *testing.T) {
+	workspace := t.TempDir()
+	fm := &fakeModel{reply: "mcp_filesystem_list_directory({\"path\":\"/tmp\"})"}
+	reg := tools.NewRegistry()
+	reg.Register(fakeExecTool{
+		name: "mcp_filesystem_list_directory",
+		data: map[string]any{
+			"content": []any{
+				map[string]any{
+					"type": "text",
+					"text": "[FILE] AGENTS.md\n[DIR] skills",
+				},
+			},
+			"structuredContent": map[string]any{
+				"content": "[FILE] AGENTS.md\n[DIR] skills",
+			},
+		},
+	})
+
+	r := New(
+		reg,
+		toolpolicy.Policy{},
+		memory.NewService(workspace),
+		domain.AgentIdentity{Name: "Assistant"},
+		"",
+		workspace,
+		nil,
+		nil,
+		skills.NewService(skills.Config{Enabled: true, AutoMatch: true, MaxInjected: 1}, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		fm,
+		"dm_only",
+		"hybrid",
+		true,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	final := ""
+	for evt := range r.Run(context.Background(), domain.RunRequest{
+		AgentID:    "main",
+		SessionKey: "agent:main:test-mcp-format",
+		Message: domain.InboundMessage{
+			Text: "list files",
+			At:   time.Now(),
+		},
+	}) {
+		if evt.Done {
+			final = evt.Text
+		}
+	}
+	if final != "[FILE] AGENTS.md\n[DIR] skills" {
+		t.Fatalf("expected mcp text content only, got %q", final)
 	}
 }

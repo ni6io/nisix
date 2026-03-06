@@ -18,6 +18,7 @@ type Request struct {
 	SoulText            string
 	ProjectContext      string
 	SkillPrompt         string
+	ToolPrompt          string
 	MemoryHits          []string
 }
 
@@ -53,6 +54,10 @@ func BuildSystemPrompt(req Request) string {
 	}
 	if v := strings.TrimSpace(req.SkillPrompt); v != "" {
 		lines = append(lines, "Active skills:")
+		lines = append(lines, v)
+	}
+	if v := strings.TrimSpace(req.ToolPrompt); v != "" {
+		lines = append(lines, "Available runtime tools:")
 		lines = append(lines, v)
 	}
 	if v := strings.TrimSpace(req.ConversationSummary); v != "" {
