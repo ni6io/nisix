@@ -89,6 +89,7 @@ func main() {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewShellTool(workspaceDir))
 
 	var mcpManager *mcp.Manager
 	if cfg.MCP.EnabledValue() {

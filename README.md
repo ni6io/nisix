@@ -16,7 +16,7 @@ Go skeleton for your OpenClaw-inspired assistant architecture.
 - `agentruntime`: runtime loop, tool dispatch, memory/soul/identity usage.
 - `identity`: loads `IDENTITY.md`.
 - `soul`: loads `SOUL.md`.
-- `tools`: tool registry + sample `time_now` tool.
+- `tools`: tool registry + built-in `time_now` and `shell` tools.
 - `mcp`: loads MCP servers from `mcp.json` (`stdio`, `streamable_http`, `sse`) and registers remote MCP tools.
 - `toolpolicy`: allow/deny policy checks.
 - `sessions`: persistent `sessions.json` + transcript JSONL appends.
@@ -223,6 +223,17 @@ ollama serve
 ollama pull llama3.2
 ```
 
+## Built-in tools
+
+Built-in local tools registered at startup:
+
+- `time_now`
+- `shell`
+
+`shell` runs `/bin/sh -lc <command>` from the agent workspace, supports optional `cwd` and `timeoutSec`, constrains the starting working directory to the workspace tree, and truncates stdout/stderr.
+
+If `tools.allow` is non-empty, add `shell` explicitly before using it.
+
 
 ## MCP tools from mcp.json
 
@@ -394,4 +405,3 @@ Migration note:
 2. Add typed plugin/skill runtime + sandboxed tool execution.
 3. Add session observability pack (`runId/sessionKey` logging conventions and dashboards).
 4. Migrate model-output tool bridge to provider-native structured function calling.
-
