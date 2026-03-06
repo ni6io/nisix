@@ -333,6 +333,46 @@ Use this as the running handoff log between sessions.
 ### Next Session First Step
 - Add optional surfaced event channel for MCP server notifications (progress/log events) if product needs them.
 
+## 2026-03-06 12:29 (Asia/Ho_Chi_Minh)
+
+### Context Loaded
+- Branch: `main`
+- Last commit: `01bd049`
+- Tracker status reviewed: yes
+
+### Changes Made
+- Added built-in `shell` tool in `internal/tools`:
+  - executes `/bin/sh -lc <command>`
+  - defaults to workspace root as `cwd`
+  - rejects `cwd` paths that escape the workspace
+  - supports bounded `timeoutSec`
+  - captures bounded `stdout`/`stderr` and returns structured exit status
+- Registered `shell` at daemon startup next to `time_now`.
+- Replaced stale `browser_open` test expectations with the real built-in `shell` tool:
+  - runtime `/tools list` coverage now checks `shell [allowed]`
+  - WS `tools.catalog` integration now asserts `shell`
+- Added coverage for shell tool behavior:
+  - successful execution in workspace
+  - `cwd` traversal rejection
+  - non-zero exit code surfaced without tool failure
+  - timeout handling
+- Updated docs:
+  - `README.md` built-in tools section
+  - `workspace/main/TOOLS.md` registered tools and shell usage notes
+  - `docs/PROJECT_TRACKER.md` current state for built-in local tools
+
+### Validation
+- `go test ./internal/tools ./internal/agentruntime ./internal/gateway`: pass
+- `go test ./...`: pass
+- `go vet ./...`: pass
+
+### Risks / Follow-up
+- `shell` currently constrains the starting working directory and runtime bounds, but it is not a real sandbox yet; stronger execution policy remains part of P4.
+- Example configs still keep `tools.allow` minimal, so `shell` must be explicitly allowlisted before runtime use.
+
+### Next Session First Step
+- Start P4 plugin/runtime policy work by defining the command-execution sandbox contract that future local tools can share.
+
 ## 2026-03-05 22:24 (Asia/Ho_Chi_Minh)
 
 ### Context Loaded

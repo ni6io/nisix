@@ -37,6 +37,9 @@ Goal: OpenClaw-aligned assistant runtime in Go with Telegram + WS control plane.
   - `echo`
   - `openai` / `codex`
   - `ollama`
+- Built-in local tools:
+  - `time_now`
+  - `shell` (workspace-scoped `/bin/sh -lc` with timeout/output bounds; policy-gated)
 - MCP tools runtime:
   - load MCP server definitions from `mcp.json`
   - supported transports: `stdio`, `streamable_http`, `sse`
@@ -82,4 +85,3 @@ Update this file when:
 1. A feature is added/removed.
 2. A decision (default behavior) changes.
 3. Backlog priorities are reordered.
-

@@ -70,6 +70,7 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewShellTool(workspace))
 
 	rt := agentruntime.New(
 		reg,
@@ -183,7 +184,7 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 	payload := frame["payload"].(map[string]any)
 	toolsList := payload["tools"].([]any)
 	assertTool(t, toolsList, "time_now")
-	assertTool(t, toolsList, "browser_open")
+	assertTool(t, toolsList, "shell")
 
 	mustSendReq(t, conn, map[string]any{
 		"type":   "req",

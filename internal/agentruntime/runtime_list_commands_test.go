@@ -78,6 +78,7 @@ func TestRuntimeToolsListCommand(t *testing.T) {
 	workspace := t.TempDir()
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
+	reg.Register(tools.NewShellTool(workspace))
 	fm := &fakeModel{reply: "should not be called"}
 
 	r := New(
@@ -100,7 +101,7 @@ func TestRuntimeToolsListCommand(t *testing.T) {
 	final := runFinalForText(t, r, "/tools list")
 	if !strings.Contains(final, "tools:") ||
 		!strings.Contains(final, "time_now [blocked]") ||
-		!strings.Contains(final, "browser_open [allowed]") {
+		!strings.Contains(final, "shell [allowed]") {
 		t.Fatalf("unexpected tools list output: %q", final)
 	}
 	if fm.calls != 0 {
