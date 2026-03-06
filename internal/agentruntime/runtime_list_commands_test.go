@@ -78,7 +78,6 @@ func TestRuntimeToolsListCommand(t *testing.T) {
 	workspace := t.TempDir()
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
-	reg.Register(tools.NewBrowserTool())
 	fm := &fakeModel{reply: "should not be called"}
 
 	r := New(

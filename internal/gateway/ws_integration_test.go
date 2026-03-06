@@ -70,7 +70,6 @@ func TestWSConnectSkillsListAndChatFlows(t *testing.T) {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
-	reg.Register(tools.NewBrowserTool())
 
 	rt := agentruntime.New(
 		reg,

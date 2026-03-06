@@ -89,7 +89,6 @@ func main() {
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewNowTool())
-	reg.Register(tools.NewBrowserTool())
 
 	var mcpManager *mcp.Manager
 	if cfg.MCP.EnabledValue() {
